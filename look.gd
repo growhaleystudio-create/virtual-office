@@ -56,10 +56,15 @@ const POST_CODE := """
 shader_type canvas_item;
 // warna 15-bit + dithering Bayer 4x4 seperti PS1
 uniform float levels = 40.0;
+// renderer web (Compatibility) lebih kontras & terang; kurva ini menyamakan dengan desktop
+uniform bool compat_fix = false;
 const float B[16] = float[](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
 
 void fragment() {
 	vec4 c = texture(TEXTURE, UV);
+	if (compat_fix) {
+		c.rgb = clamp(-0.178 * c.rgb * c.rgb + 1.012 * c.rgb + 0.08, 0.0, 1.0);
+	}
 	ivec2 p = ivec2(floor(UV / TEXTURE_PIXEL_SIZE));
 	float d = B[(p.y % 4) * 4 + (p.x % 4)] / 16.0 - 0.5;
 	c.rgb = floor(c.rgb * levels + d + 0.5) / levels;

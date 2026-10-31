@@ -5,7 +5,6 @@ const W := 44
 const H := 30
 const FH := Agent.FLOOR_H
 const NONE := Vector2i(-1, -1)
-const PIXEL_SCALE := 3
 const WALL_T := 0.25
 
 # tangga: 2 lajur (z 4..5), naik dari x=28 (lantai 1) ke x=34 (lantai 2)
@@ -179,7 +178,7 @@ func _cyl(pos: Vector3, r: float, h: float, color: Color, tex := "grain", segs :
 
 func _build_render() -> void:
 	svp = SubViewport.new()
-	svp.size = Vector2i(1280 / PIXEL_SCALE, 720 / PIXEL_SCALE)
+	svp.size = _svp_size()
 	svp.world_3d = get_world_3d()
 	svp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(svp)
@@ -202,7 +201,29 @@ func _build_render() -> void:
 	screen.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.material = Look.post_material()
+	screen.material.set_shader_parameter("compat_fix", RenderingServer.get_current_rendering_method() == "gl_compatibility")
 	layer.add_child(screen)
+
+
+## Resolusi gambar 3D (jumlah baris piksel). Makin kecil = makin retro/kotak-kotak.
+const PIXEL_LINES := [240, 360, 540]
+var _pix_i := 1
+
+
+func _svp_size() -> Vector2i:
+	var lines: int = PIXEL_LINES[_pix_i]
+	return Vector2i(roundi(lines * 16.0 / 9.0), lines)
+
+
+func cycle_pixel_detail() -> void:
+	_pix_i = (_pix_i + 1) % PIXEL_LINES.size()
+	svp.size = _svp_size()
+	show_feedback("Detail piksel: %s (%d baris)" % [["retro", "sedang", "halus"][_pix_i], PIXEL_LINES[_pix_i]])
+
+
+## Posisi layar (kanvas 1280x720) -> piksel di SubViewport 3D.
+func _to_svp(p: Vector2) -> Vector2:
+	return p * Vector2(svp.size) / Vector2(1280.0, 720.0)
 
 
 func _build_env() -> void:
@@ -216,13 +237,20 @@ func _build_env() -> void:
 	env.fog_light_color = Color(0.70, 0.82, 0.95)
 	env.fog_density = 0.003
 	env.fog_sky_affect = 0.0
+	# renderer web (WebGL / Compatibility) menghitung cahaya lebih terang & kontras;
+	# turunkan supaya tampilannya sama dengan versi desktop
+	var compat := RenderingServer.get_current_rendering_method() == "gl_compatibility"
+	var sun_e := 1.15
+	if compat:
+		sun_e = 0.8
+		env.ambient_light_energy = 0.25
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, -35, 0)
 	sun.light_color = Color(1.0, 0.92, 0.78)
-	sun.light_energy = 1.15
+	sun.light_energy = sun_e
 	sun.shadow_enabled = true
 	sun.shadow_opacity = 0.75
 	sun.directional_shadow_max_distance = 160.0
@@ -1709,7 +1737,7 @@ func select(a: Agent) -> void:
 
 
 func _ground_point(screen_pos: Vector2) -> Variant:
-	var sp := screen_pos / PIXEL_SCALE
+	var sp := _to_svp(screen_pos)
 	var o := cam.project_ray_origin(sp)
 	var d := cam.project_ray_normal(sp)
 	if absf(d.y) < 0.001:
@@ -1754,6 +1782,8 @@ func _unhandled_input(e: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			KEY_H:
 				toggle_roster()
+			KEY_P:
+				cycle_pixel_detail()
 			KEY_F:
 				if selected:
 					focus_agent(selected)
@@ -1771,7 +1801,7 @@ func _unhandled_input(e: InputEvent) -> void:
 
 ## Karakter di bawah kursor (atau null).
 func _pick_agent(pos: Vector2) -> Agent:
-	var sp := pos / PIXEL_SCALE
+	var sp := _to_svp(pos)
 	var o := cam.project_ray_origin(sp)
 	var d := cam.project_ray_normal(sp)
 	var best: Agent = null
@@ -2029,7 +2059,7 @@ func _build_ui() -> void:
 	cl.add_child(ui)
 
 	var help := Label.new()
-	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3 atau PgUp/PgDn: lantai  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  Enter: perintah"
+	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3 atau PgUp/PgDn: lantai  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: detail piksel  ·  Enter: perintah"
 	help.add_theme_font_size_override("font_size", 12)
 	help.position = Vector2(12, 6)
 	ui.add_child(help)
