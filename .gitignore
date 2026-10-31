@@ -1,0 +1,7 @@
+# cache editor Godot
+.godot/
+*.tmp
+# rahasia relay (token) — JANGAN di-commit, salin dari bridge.cfg.example
+bridge.cfg
+bridge/.venv/
+__pycache__/

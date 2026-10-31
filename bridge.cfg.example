@@ -1,0 +1,4 @@
+; Salin jadi bridge.cfg lalu isi. Tanpa bridge.cfg, office jalan offline seperti biasa.
+[bridge]
+url="ws://127.0.0.1:8765/ws"
+token="ganti-dengan-token-rahasia"
