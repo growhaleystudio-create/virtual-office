@@ -6,7 +6,11 @@
   "outputDirectory": "build/web",
   "headers": [
     {
-      "source": "/(.*)\.(wasm|pck)",
+      "source": "/index.wasm",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+    },
+    {
+      "source": "/index.pck",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
     }
   ]

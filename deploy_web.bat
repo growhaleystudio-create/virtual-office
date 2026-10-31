@@ -1,5 +1,5 @@
 @echo off
-rem Export versi web lalu upload ke Vercel (butuh: npx vercel login sekali)
+rem Export ulang versi web ke buildweb (lalu commit & push, Vercel deploy otomatis)
 cd /d %~dp0
 "C:\Godot\Godot_v4.7.2-stable_win64_console.exe" --headless --path . --export-release "Web" build\web\index.html
 cd build\web
