@@ -45,10 +45,17 @@ header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gre
 .layout {
 	height: calc(100% - 56px);
 	display: grid;
-	grid-template-columns: 290px minmax(0, 1fr) 290px;
-	gap: 16px;
-	padding: 16px;
+	grid-template-columns: 270px minmax(0, 1fr) 270px;
+	gap: 12px;
+	padding: 12px;
+	transition: grid-template-columns 0.25s ease;
 }
+body.hide-left .layout { grid-template-columns: 0 minmax(0, 1fr) 270px; }
+body.hide-right .layout { grid-template-columns: 270px minmax(0, 1fr) 0; }
+body.hide-left.hide-right .layout { grid-template-columns: 0 minmax(0, 1fr) 0; }
+body.hide-left aside.left, body.hide-right aside.right { visibility: hidden; overflow: hidden; }
+.toggles { display: flex; gap: 6px; margin-left: 16px; }
+.toggles button { flex: none; padding: 6px 12px; font-size: 12px; }
 aside { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
 aside::-webkit-scrollbar { width: 6px; }
 aside::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
@@ -80,10 +87,10 @@ aside::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .who small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status { font-size: 11px; color: var(--blue-l); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .founder img { width: 40px; height: 52px; object-fit: cover; object-position: center 15%; border-radius: 6px; flex: none; background: #e9edf1; }
-.stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; gap: 10px; }
+.stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; gap: 8px; }
 .frame {
 	position: relative;
-	width: min(100%, calc((100vh - 140px) * 16 / 9));
+	width: min(100%, calc((100vh - 56px - 24px - 34px) * 16 / 9));
 	aspect-ratio: 16 / 9;
 	border-radius: 14px;
 	overflow: hidden;
@@ -175,11 +182,16 @@ $GODOT_HEAD_INCLUDE
 	<img src="static/logomark_white.png" alt="">
 	<div class="brand">Growhaley</div>
 	<div class="sub">Virtual Office</div>
+	<div class="toggles">
+		<button id="t-left" class="on" title="Tampilkan / sembunyikan panel kiri">Panel Tim</button>
+		<button id="t-right" class="on" title="Tampilkan / sembunyikan panel kanan">Panel Kontrol</button>
+		<button id="t-focus" title="Sembunyikan semua panel, frame jadi besar">Layar Lebar</button>
+	</div>
 	<div class="live"><span class="dot"></span><span id="mode">Memuat kantor...</span></div>
 </header>
 
 <div class="layout">
-	<aside>
+	<aside class="left">
 		<div class="card">
 			<h3>Tim <span id="team-count"></span></h3>
 			<div id="team"></div>
@@ -202,7 +214,7 @@ $GODOT_HEAD_INCLUDE
 		<div class="feedback" id="feedback">Klik karakter atau nama di panel Tim untuk melihat mereka.</div>
 	</section>
 
-	<aside>
+	<aside class="right">
 		<div class="card">
 			<h3>Lantai</h3>
 			<div class="btns" id="floors">
@@ -300,6 +312,25 @@ $("cmd-form").onsubmit = (e) => {
 	$("cmd").value = "";
 };
 document.querySelectorAll("#chips .chip").forEach((c) => c.onclick = () => send("run", c.textContent));
+
+// sembunyikan / tampilkan panel (diingat di browser ini)
+function setPanels(left, right) {
+	document.body.classList.toggle("hide-left", !left);
+	document.body.classList.toggle("hide-right", !right);
+	$("t-left").classList.toggle("on", left);
+	$("t-right").classList.toggle("on", right);
+	$("t-focus").classList.toggle("on", !left && !right);
+	try { localStorage.setItem("ov-panels", JSON.stringify([left, right])); } catch (e) {}
+}
+let saved = [true, true];
+try { saved = JSON.parse(localStorage.getItem("ov-panels")) || saved; } catch (e) {}
+setPanels(saved[0], saved[1]);
+$("t-left").onclick = () => setPanels(document.body.classList.contains("hide-left"), !document.body.classList.contains("hide-right"));
+$("t-right").onclick = () => setPanels(!document.body.classList.contains("hide-left"), document.body.classList.contains("hide-right"));
+$("t-focus").onclick = () => {
+	const allHidden = document.body.classList.contains("hide-left") && document.body.classList.contains("hide-right");
+	setPanels(allHidden, allHidden);
+};
 
 // state dari Godot (dipanggil berkala)
 let lastFeedback = "";
