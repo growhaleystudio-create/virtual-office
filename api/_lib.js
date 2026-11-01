@@ -5,7 +5,7 @@ const ACCOUNTS = require("./_accounts.js");
 const SESSION_DAYS = 30;
 
 function secret() {
-	const s = process.env.SESSION_SECRET;
+	const s = (process.env.SESSION_SECRET || "").trim();
 	if (!s || s.length < 16) throw new Error("SESSION_SECRET belum diset di Vercel");
 	return s;
 }
