@@ -206,6 +206,7 @@ button.on { background: var(--blue); border-color: var(--blue); }
 	border-radius: 4px;
 	padding: 1px 6px;
 }
+.hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
 .log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
@@ -332,6 +333,12 @@ $GODOT_HEAD_INCLUDE
 				<button data-m="1">Sedang</button>
 				<button data-m="2">HD</button>
 			</div>
+			<h3 style="margin-top:14px">Detail kota</h3>
+			<div class="btns" id="detail">
+				<button data-d="0">Ringan</button>
+				<button data-d="1">Penuh</button>
+			</div>
+			<p class="hint">Ringan: hanya kantor, cocok untuk HP / laptop lama. Penuh: kota, NPC &amp; kendaraan.</p>
 		</div>
 		<div class="card">
 			<h3>Perintah</h3>
@@ -365,6 +372,7 @@ $GODOT_HEAD_INCLUDE
 				<li><kbd>Tahan kanan</kbd> geser kamera</li>
 				<li><kbd>Scroll</kbd> zoom (jauh = bangunan utuh)</li>
 				<li><kbd>0</kbd> tampak luar</li>
+				<li><kbd>L</kbd> kota ringan / penuh</li>
 				<li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> ganti lantai</li>
 				<li><kbd>Hover</kbd> berlian hijau: info</li>
 			</ul>
@@ -415,6 +423,15 @@ for (const [name, role, key] of FOUNDERS) {
 // tombol lantai & tampilan
 document.querySelectorAll("#floors button").forEach((b) => b.onclick = () => b.dataset.x ? send("exterior") : send("floor", b.dataset.f));
 document.querySelectorAll("#modes button").forEach((b) => b.onclick = () => send("pixel", b.dataset.m));
+// detail kota diingat di browser ini; default Ringan
+let detailPref = "0";
+try { detailPref = localStorage.getItem("ov-detail") || "0"; } catch (e) {}
+let detailSynced = false;
+document.querySelectorAll("#detail button").forEach((b) => b.onclick = () => {
+	detailPref = b.dataset.d;
+	try { localStorage.setItem("ov-detail", detailPref); } catch (e) {}
+	send("detail", detailPref);
+});
 $("cmd-form").onsubmit = (e) => {
 	e.preventDefault();
 	const t = $("cmd").value.trim();
@@ -502,6 +519,11 @@ window.ovUpdate = function (s) {
 	}
 	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
+	if (!detailSynced) {
+		detailSynced = true;
+		if ((detailPref === "1") !== s.detail) send("detail", detailPref);
+	}
+	document.querySelectorAll("#detail button").forEach((b) => b.classList.toggle("on", (b.dataset.d === "1") === s.detail));
 	if (s.feedback && s.feedback !== lastFeedback) {
 		lastFeedback = s.feedback;
 		$("feedback").textContent = s.feedback;

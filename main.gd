@@ -113,8 +113,25 @@ var town  # lingkungan kota (town.gd)
 var roster_rows: VBoxContainer
 var _status_timer := 0.0
 var bridge: Bridge
-## HP (browser Android/iOS): mode ringan supaya lancar di GPU/CPU HP.
-var lite := OS.has_feature("web_android") or OS.has_feature("web_ios")
+## Detail lingkungan. Penuh = kota (NPC, kendaraan, gedung tetangga) + bayangan.
+## Ringan = hanya kantor & halaman, tanpa bayangan (untuk HP / laptop lemah).
+## Web mulai Ringan (kota baru dibangun saat pemain memilih Penuh); desktop mulai Penuh.
+var full_detail := not OS.has_feature("web") and not OS.get_cmdline_user_args().has("lite")
+var sun: DirectionalLight3D
+var _sun_e := 1.15
+
+
+## Bayangan tetap nyala (tanpa bayangan, renderer web tampak pudar/abu-abu), tapi di mode
+## ringan dibuat murah: satu irisan saja & jarak pendek (cukup untuk area kantor).
+func _apply_sun() -> void:
+	sun.light_energy = _sun_e
+	sun.shadow_enabled = true
+	if full_detail:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_max_distance = 160.0
+	else:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		sun.directional_shadow_max_distance = 90.0
 
 
 func _ready() -> void:
@@ -281,13 +298,12 @@ func _build_env() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, -35, 0)
 	sun.light_color = Color(1.0, 0.92, 0.78)
-	sun.light_energy = sun_e
-	sun.shadow_enabled = not lite  # bayangan = render ulang scene, paling berat di HP
+	_sun_e = sun_e
+	_apply_sun()
 	sun.shadow_opacity = 0.75
-	sun.directional_shadow_max_distance = 160.0
 	sun.directional_shadow_blend_splits = true
 	sun.shadow_normal_bias = 1.5
 	add_child(sun)
@@ -609,11 +625,8 @@ func _build_world() -> void:
 			sides[sd] = n
 		ext_walls.append(sides)
 	_build_outside()
-	town = preload("res://town.gd").new()
-	town.name = "Kota"
-	town.lite = lite
-	add_child(town)
-	town.build()
+	if full_detail:
+		_make_town()
 	_build_floor0()
 	_build_floor1()
 	_build_floor2()
@@ -622,7 +635,6 @@ func _build_world() -> void:
 	_decorate_walls()
 	_build_roof()
 	# gabungkan mesh diam per lantai / per sisi dinding supaya draw call sedikit
-	town.set_meta("no_batch", true)
 	for f in NFLOORS:
 		for sd in ext_walls[f]:
 			var n: Node3D = ext_walls[f][sd]
@@ -1242,7 +1254,7 @@ const EXT_LEAVE := 40.0
 
 ## Atap modern: pelat datar tipis putih yang "melayang" di atas pita kaca gelap, sofit kayu,
 ## kanopi menjorok ke teras dengan pergola & kolom ramping, atap hijau + panel surya,
-## menara tangga gelap berlogo; ditambah lis lantai putih & sirip kayu (hanya saat tampak luar).
+## ditambah lis lantai putih & sirip kayu (hanya saat tampak luar).
 func _build_roof() -> void:
 	roof = Node3D.new()
 	roof.name = "Atap"
@@ -1302,19 +1314,6 @@ func _build_roof() -> void:
 			sp.rotation.x = -0.3
 			Agent.make_box(roof, Vector3(1.0 + c * 2.6 + 2.5, ry + 0.15, -13.0 + r * 2.6 + 0.4), Vector3(0.08, 0.3, 0.08), Color(0.6, 0.6, 0.62), "metal")
 
-	# menara tangga: kotak gelap menjulang, pelat putih di puncak, logo menghadap jalan
-	var tx0 := STAIR_X0 - W / 2.0
-	var tx1 := STAIR_X1 - W / 2.0
-	var tz0 := STAIR2_Z - 2.0 - H / 2.0
-	var tz1 := STAIR2_Z + 3.0 - H / 2.0
-	var th := 4.4
-	var tc := Vector3((tx0 + tx1) / 2.0, y_top + th / 2.0, (tz0 + tz1) / 2.0)
-	Agent.make_box(roof, tc, Vector3(tx1 - tx0, th, tz1 - tz0), BRAND_INK, "stone")
-	Agent.make_box(roof, Vector3(tc.x, y_top + th + 0.12, tc.z), Vector3(tx1 - tx0 + 0.8, 0.24, tz1 - tz0 + 0.8), white, "grain")
-	Agent.make_box(roof, Vector3(tx1 + 0.01, y_top + th / 2.0 + 0.3, tc.z), Vector3(0.04, th - 1.6, 1.0), dark_glass.lightened(0.25), "grain")
-	var ln := _facing_node(roof, Vector3(tc.x, y_top + th - 1.3, tz1 + 0.02), Vector3(0, 0, 1))
-	_picture(ln, Vector3.ZERO, Vector2(5.4, 1.8), "sign_blue")
-
 	# lis lantai putih di tiap tingkat (garis horizontal khas gedung modern)
 	for lv in [[FH, zs], [2.0 * FH, z3]]:
 		var y: float = lv[0]
@@ -1335,6 +1334,26 @@ func _build_roof() -> void:
 		for sx: float in [-1.0, 1.0]:
 			Agent.make_box(roof, Vector3(sx * (hw + 0.25), fy, fz), Vector3(0.3, 3.0, 0.1), WOOD, "planks")
 		fz += 0.9
+
+
+func _make_town() -> void:
+	town = preload("res://town.gd").new()
+	town.name = "Kota"
+	town.set_meta("no_batch", true)
+	add_child(town)
+	town.build()
+
+
+## Ganti detail lingkungan (tombol L / panel web). Kota dibangun saat pertama kali dipakai.
+func set_detail(on: bool) -> void:
+	full_detail = on
+	if on and town == null:
+		_make_town()
+	if town:
+		town.visible = on
+		town.process_mode = Node.PROCESS_MODE_INHERIT if on else Node.PROCESS_MODE_DISABLED
+	_apply_sun()
+	show_feedback("Detail penuh: kota, NPC & kendaraan aktif" if on else "Mode ringan: hanya kantor, tanpa kota & NPC luar")
 
 
 ## Masuk/keluar tampak luar (dipanggil otomatis dari zoom kamera).
@@ -1993,6 +2012,8 @@ func _unhandled_input(e: InputEvent) -> void:
 				toggle_roster()
 			KEY_P:
 				cycle_pixel_detail()
+			KEY_L:
+				set_detail(not full_detail)
 			KEY_F:
 				if selected:
 					focus_agent(selected)
@@ -2219,7 +2240,8 @@ func _update_camera(d: float) -> void:
 	pivot.rotation = Vector3(pitch, yaw, 0)
 	cam.position = Vector3(0, 0, zoom)
 	cam.near = clampf(zoom * 0.015, 0.1, 1.0)
-	town.update_occlusion(cam.global_position, pivot.global_position)
+	if town and town.visible:
+		town.update_occlusion(cam.global_position, pivot.global_position)
 	# sembunyikan dinding luar yang menghalangi kamera
 	var cd := Vector3(sin(yaw), 0, cos(yaw))
 	if not exterior and zoom > EXT_ENTER:
@@ -2288,7 +2310,7 @@ func _build_ui() -> void:
 	cl.add_child(ui)
 
 	var help := Label.new()
-	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3: lantai  ·  0 / zoom out: tampak luar  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  Enter: perintah"
+	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3: lantai  ·  0 / zoom out: tampak luar  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  L: kota ringan/penuh  ·  Enter: perintah"
 	help.add_theme_font_size_override("font_size", 12)
 	help.position = Vector2(12, 6)
 	ui.add_child(help)
@@ -2397,6 +2419,9 @@ func _on_js_command(args: Array) -> void:
 			go_floor(int(arg))
 		"exterior":
 			go_exterior()
+		"detail":
+			if (arg == "1") != full_detail:
+				set_detail(arg == "1")
 		"pixel":
 			_pix_i = clampi(int(arg), 0, PIXEL_LINES.size() - 1)
 			_apply_pixel_mode()
@@ -2420,7 +2445,7 @@ func _push_web_state() -> void:
 	for a in agents:
 		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
 			"color": a.shirt_color.to_html(false)})
-	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "pixel": _pix_i, "feedback": feedback.text,
+	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
