@@ -151,6 +151,7 @@ body.immersive .fs-btn { right: max(10px, env(safe-area-inset-right)); bottom: m
 #status-notice { display: none; color: #ffd0d0; padding: 1rem; text-align: center; }
 .feedback { min-height: 22px; color: var(--muted); font-size: 13px; text-align: center; }
 .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.btns .wide { flex-basis: 100%; }
 button {
 	font: inherit;
 	font-weight: 700;
@@ -318,6 +319,7 @@ $GODOT_HEAD_INCLUDE
 		<div class="card">
 			<h3>Lantai</h3>
 			<div class="btns" id="floors">
+				<button data-x="1" class="wide">Tampak Luar</button>
 				<button data-f="0">Lantai 1</button>
 				<button data-f="1">Lantai 2</button>
 				<button data-f="2">Founder</button>
@@ -354,14 +356,15 @@ $GODOT_HEAD_INCLUDE
 				<li><kbd>Ketuk</kbd> pilih karakter / jalan ke titik</li>
 				<li><kbd>Geser 1 jari</kbd> putar kamera</li>
 				<li><kbd>Geser 2 jari</kbd> geser kamera</li>
-				<li><kbd>Cubit</kbd> zoom</li>
+				<li><kbd>Cubit</kbd> zoom (jauh = bangunan utuh)</li>
 				<li><kbd>⤢</kbd> layar penuh (miringkan HP)</li>
 			</ul>
 			<ul class="keys mouse">
 				<li><kbd>Klik</kbd> pilih karakter / jalan ke titik</li>
 				<li><kbd>Tahan kiri</kbd> putar kamera</li>
 				<li><kbd>Tahan kanan</kbd> geser kamera</li>
-				<li><kbd>Scroll</kbd> zoom</li>
+				<li><kbd>Scroll</kbd> zoom (jauh = bangunan utuh)</li>
+				<li><kbd>0</kbd> tampak luar</li>
 				<li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> ganti lantai</li>
 				<li><kbd>Hover</kbd> berlian hijau: info</li>
 			</ul>
@@ -410,7 +413,7 @@ for (const [name, role, key] of FOUNDERS) {
 }
 
 // tombol lantai & tampilan
-document.querySelectorAll("#floors button").forEach((b) => b.onclick = () => send("floor", b.dataset.f));
+document.querySelectorAll("#floors button").forEach((b) => b.onclick = () => b.dataset.x ? send("exterior") : send("floor", b.dataset.f));
 document.querySelectorAll("#modes button").forEach((b) => b.onclick = () => send("pixel", b.dataset.m));
 $("cmd-form").onsubmit = (e) => {
 	e.preventDefault();
@@ -497,7 +500,7 @@ window.ovUpdate = function (s) {
 		if (r.status.textContent !== txt) r.status.textContent = txt;
 		r.classList.toggle("sel", a.name === s.selected);
 	}
-	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", Number(b.dataset.f) === s.floor));
+	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
 	if (s.feedback && s.feedback !== lastFeedback) {
 		lastFeedback = s.feedback;

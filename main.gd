@@ -125,6 +125,9 @@ func _ready() -> void:
 	_build_whip_cursor()
 	_build_bridge()
 	set_view_floor(0)
+	# mulai dari tampak luar: bangunan utuh, atap turun; zoom in untuk masuk ke ruangan
+	t_zoom = 54.0
+	zoom = 54.0
 	rng.randomize()
 	_apply_pixel_mode()
 	_setup_web_bridge()
@@ -614,6 +617,7 @@ func _build_world() -> void:
 	_build_signs()
 	_flush_walls()
 	_decorate_walls()
+	_build_roof()
 	# gabungkan mesh diam per lantai / per sisi dinding supaya draw call sedikit
 	town.set_meta("no_batch", true)
 	for f in NFLOORS:
@@ -623,6 +627,7 @@ func _build_world() -> void:
 			Look.batch(n, true)
 		Look.batch(floors[f], true)
 		floors[f].set_meta("no_batch", true)
+	Look.batch(roof, true)
 	Look.batch(self, true)
 
 
@@ -1221,14 +1226,154 @@ func _build_signs() -> void:
 	var wn: Node3D = ext_walls[0]["W"]
 	var lp := _facing_node(wn, Vector3(-W / 2.0 + 0.03, 2.25, 21.5 - H / 2.0), Vector3(1, 0, 0))
 	_picture(lp, Vector3.ZERO, Vector2(3.3, 1.1), "sign_blue")
-	# papan logo di atap lantai 3 menghadap selatan
-	cur = floors[2]
-	var rp := Vector3(-2.0, 3.0, -H / 2.0 + 0.6)
+
+
+# ---------- atap (tampak saat zoom out) ----------
+
+var roof: Node3D
+var exterior := false  # true = tampak luar: bangunan utuh beratap, semua lantai & dinding tampil
+var _roof_drop := 8.0
+const EXT_ENTER := 44.0  # zoom lebih jauh dari ini -> tampak luar
+const EXT_LEAVE := 40.0
+
+
+## Prisma dari poligon cembung di bidang XY (dunia), diekstrusi dari z0 ke z1.
+func _prism(parent: Node3D, pts: Array, z0: float, z1: float, color: Color, tex := "metal") -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := pts.size()
+	var cen := Vector2.ZERO
+	for q: Vector2 in pts:
+		cen += q / n
+	var tri := func(a: Vector3, b: Vector3, c: Vector3, nrm: Vector3) -> void:
+		if (b - a).cross(c - a).dot(nrm) > 0.0:  # Godot: sisi depan searah jarum jam
+			var t := b
+			b = c
+			c = t
+		for v in [a, b, c]:
+			st.set_normal(nrm)
+			st.add_vertex(v)
+	for i in range(1, n - 1):
+		for z: float in [z0, z1]:
+			var nz := Vector3(0, 0, signf(z - (z0 + z1) / 2.0))
+			tri.call(Vector3(pts[0].x, pts[0].y, z), Vector3(pts[i].x, pts[i].y, z), Vector3(pts[i + 1].x, pts[i + 1].y, z), nz)
+	for i in n:
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		var e := b - a
+		var on := Vector2(e.y, -e.x).normalized()
+		if on.dot((a + b) / 2.0 - cen) < 0.0:
+			on = -on
+		var nrm := Vector3(on.x, on.y, 0)
+		tri.call(Vector3(a.x, a.y, z0), Vector3(b.x, b.y, z0), Vector3(b.x, b.y, z1), nrm)
+		tri.call(Vector3(a.x, a.y, z0), Vector3(b.x, b.y, z1), Vector3(a.x, a.y, z1), nrm)
+	var m := MeshInstance3D.new()
+	m.mesh = st.commit()
+	m.material_override = Look.mat(color, tex)
+	parent.add_child(m)
+	return m
+
+
+## Atap lipat zig-zag khas (folded-plate / "butterfly" berderet) di atas lantai 3,
+## kaca segitiga di ujung tiap lipatan, menara kaca di atas tangga, papan logo di punggung atap.
+## Hanya tampil saat kamera zoom out (tampak luar); saat zoom in atap terangkat & hilang.
+func _build_roof() -> void:
+	roof = Node3D.new()
+	roof.name = "Atap"
+	add_child(roof)
+	roof.set_meta("no_batch", true)
+	var y_top := 2.0 * FH + 3.0
+	var zn := -H / 2.0 - 0.9  # sisi utara (sedikit menjorok)
+	var zs := 18.0 - H / 2.0 + 1.9  # sisi selatan: kanopi lebar menaungi fasad kaca lantai 3
+	var xe := W / 2.0 + 0.9
+	# pelat atap tebal + garis biru muda
+	Agent.make_box(roof, Vector3(0, y_top + 0.15, (zn + zs) / 2.0), Vector3(xe * 2.0, 0.3, zs - zn), BRAND_INK, "metal")
+	Agent.make_box(roof, Vector3(0, y_top + 0.06, (zn + zs) / 2.0), Vector3(xe * 2.0 + 0.08, 0.08, zs - zn + 0.08), BRAND_LIGHT, "metal")
+	var y0 := y_top + 0.3
+	var nb := 6
+	var bw := xe * 2.0 / nb
+	var yr := y0 + 2.2  # punggung lipatan
+	var yv := y0 + 0.45  # lembah lipatan
+	var pz0 := zn - 0.3
+	var pz1 := zs + 0.4
+	var depth := pz1 - pz0
+	var pzc := (pz0 + pz1) / 2.0
+	var glass := Color(0.60, 0.82, 0.96, 0.5)
+	for i in nb:
+		var xl := -xe + i * bw
+		var xr := xl + bw
+		var xc := xl + bw / 2.0
+		var col: Color = BRAND_BLUE if i % 2 == 0 else BRAND_BLUE.lightened(0.12)
+		for seg in [[Vector2(xl, yr), Vector2(xc, yv)], [Vector2(xc, yv), Vector2(xr, yr)]]:
+			var a: Vector2 = seg[0]
+			var b: Vector2 = seg[1]
+			var mid := (a + b) / 2.0
+			var p := Agent.make_box(roof, Vector3(mid.x, mid.y, pzc), Vector3(a.distance_to(b) + 0.12, 0.16, depth), col, "metal")
+			p.rotation.z = atan2(b.y - a.y, b.x - a.x)
+		# talang di lembah
+		Agent.make_box(roof, Vector3(xc, yv + 0.05, pzc), Vector3(0.4, 0.1, depth + 0.05), BRAND_INK, "metal")
+		# kaca segitiga di ujung utara & selatan lipatan, dengan kusen
+		for gz: float in [zn + 0.15, zs - 0.15]:
+			var pts := [Vector2(xl, y0), Vector2(xl, yr - 0.1), Vector2(xc, yv - 0.1), Vector2(xr, yr - 0.1), Vector2(xr, y0)]
+			_prism(roof, pts, gz - 0.03, gz + 0.03, glass)
+			for f: float in [0.0, 0.25, 0.75]:
+				var mx := xl + bw * f
+				var top := lerpf(yr, yv, f * 2.0 if f <= 0.5 else (1.0 - f) * 2.0)
+				Agent.make_box(roof, Vector3(mx, (y0 + top) / 2.0, gz), Vector3(0.12, top - y0, 0.14), BRAND_INK, "metal")
+			Agent.make_box(roof, Vector3(xc, y0 + 0.08, gz), Vector3(bw, 0.16, 0.16), BRAND_INK, "metal")
+	# tutup punggung lipatan
+	for i in nb + 1:
+		Agent.make_box(roof, Vector3(-xe + i * bw, yr + 0.07, pzc), Vector3(0.32, 0.14, depth + 0.06), BRAND_LIGHT, "metal")
+	for gz: float in [zn + 0.15, zs - 0.15]:
+		Agent.make_box(roof, Vector3(xe, (y0 + yr) / 2.0, gz), Vector3(0.12, yr - y0, 0.14), BRAND_INK, "metal")
+
+	# menara kaca di atas tangga (lantern), atap pink
+	var lc := Vector3(STAIR_X0 + 3.0 - W / 2.0, y0, STAIR2_Z + 1.0 - H / 2.0)
+	var ls := Vector3(5.2, 3.6, 3.4)
+	Agent.make_box(roof, lc + Vector3(0, ls.y / 2.0, 0), ls, Color(0.70, 0.88, 0.97, 0.55))
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			Agent.make_box(roof, lc + Vector3(sx * ls.x / 2.0, ls.y / 2.0, sz * ls.z / 2.0), Vector3(0.16, ls.y, 0.16), BRAND_INK, "metal")
+		Agent.make_box(roof, lc + Vector3(sx * ls.x / 2.0, ls.y * 0.5, 0), Vector3(0.1, 0.1, ls.z), BRAND_INK, "metal")
+	for sz: float in [-1.0, 1.0]:
+		Agent.make_box(roof, lc + Vector3(0, ls.y * 0.5, sz * ls.z / 2.0), Vector3(ls.x, 0.1, 0.1), BRAND_INK, "metal")
+	Agent.make_box(roof, lc + Vector3(0, ls.y + 0.12, 0), Vector3(ls.x + 0.8, 0.24, ls.z + 0.8), BRAND_PINK, "metal")
+	_prism(roof, [Vector2(lc.x - ls.x / 2.0 - 0.2, lc.y + ls.y + 0.24), Vector2(lc.x, lc.y + ls.y + 1.3),
+		Vector2(lc.x + ls.x / 2.0 + 0.2, lc.y + ls.y + 0.24)], lc.z - ls.z / 2.0 - 0.2, lc.z + ls.z / 2.0 + 0.2, BRAND_PINK.darkened(0.15))
+
+	# papan logo besar berdiri di punggung atap tengah, menghadap jalan (selatan)
+	var bp := Vector3(0.0, yr + 2.0, zn + 3.0)
 	for sx: float in [-3.6, 3.6]:
-		_box(rp + Vector3(sx, 0.8, -0.2), Vector3(0.18, 1.6, 0.18), Color(0.3, 0.3, 0.32), "metal")
-	_box(rp + Vector3(0, 2.2, -0.08), Vector3(8.6, 2.9, 0.15), BRAND_INK, "metal")
-	var rn := _facing_node(floors[2], rp + Vector3(0, 2.2, 0.0), Vector3(0, 0, 1))
+		Agent.make_box(roof, Vector3(sx, (y0 + bp.y) / 2.0, bp.z - 0.2), Vector3(0.18, bp.y - y0, 0.18), Color(0.3, 0.3, 0.32), "metal")
+	Agent.make_box(roof, bp + Vector3(0, 0, -0.08), Vector3(8.6, 2.9, 0.15), BRAND_INK, "metal")
+	var rn := _facing_node(roof, bp, Vector3(0, 0, 1))
 	_picture(rn, Vector3.ZERO, Vector2(8.3, 2.77), "sign_blue")
+
+
+## Masuk/keluar tampak luar (dipanggil otomatis dari zoom kamera).
+func _set_exterior(on: bool) -> void:
+	exterior = on
+	if on:
+		floors[1].visible = true
+		floors[2].visible = true
+		show_feedback("Tampak luar kantor Growhaley · zoom in untuk melihat ruangan")
+	else:
+		set_view_floor(view_floor)
+		show_feedback("Lantai %d · zoom out untuk melihat bangunan utuh" % (view_floor + 1))
+
+
+## Pindah lantai atas permintaan pemakai (tombol / tombol angka): keluar dari tampak luar dulu.
+func go_floor(f: int) -> void:
+	follow = null
+	if exterior:
+		t_zoom = 34.0
+	set_view_floor(f)
+
+
+func go_exterior() -> void:
+	follow = null
+	t_zoom = maxf(t_zoom, 56.0)
+	t_pivot = Vector3(0, FH, 0)
 
 
 # ---------- lantai 3: ruang founder ----------
@@ -1750,8 +1895,8 @@ func run_command(text: String) -> String:
 
 func set_view_floor(f: int) -> void:
 	view_floor = clampi(f, 0, NFLOORS - 1)
-	floors[1].visible = view_floor >= 1
-	floors[2].visible = view_floor >= 2
+	floors[1].visible = exterior or view_floor >= 1
+	floors[2].visible = exterior or view_floor >= 2
 	t_pivot.y = view_floor * FH
 	for i in floor_btns.size():
 		floor_btns[i].set_pressed_no_signal(i == view_floor)
@@ -1864,16 +2009,18 @@ func _unhandled_input(e: InputEvent) -> void:
 			KEY_F:
 				if selected:
 					focus_agent(selected)
+			KEY_0:
+				go_exterior()
 			KEY_1:
-				set_view_floor(0)
+				go_floor(0)
 			KEY_2:
-				set_view_floor(1)
+				go_floor(1)
 			KEY_3:
-				set_view_floor(2)
+				go_floor(2)
 			KEY_PAGEUP:
-				set_view_floor(view_floor + 1)
+				go_floor(view_floor + 1)
 			KEY_PAGEDOWN:
-				set_view_floor(view_floor - 1)
+				go_floor(view_floor - 1)
 
 
 ## Karakter di bawah kursor (atau null).
@@ -1881,6 +2028,8 @@ func _pick_agent(pos: Vector2) -> Agent:
 	var sp := _to_svp(pos)
 	var o := cam.project_ray_origin(sp)
 	var d := cam.project_ray_normal(sp)
+	if exterior:
+		return null  # tampak luar: karakter di dalam tertutup atap
 	var best: Agent = null
 	var best_d := 0.9
 	for a in agents:
@@ -2046,6 +2195,14 @@ func whip(a: Agent) -> void:
 
 
 func _click(pos: Vector2) -> void:
+	if exterior:
+		# klik bangunan dari luar = zoom masuk ke titik itu
+		var p = _ground_point(pos)
+		if p != null:
+			t_pivot = Vector3(p.x, view_floor * FH, p.z)
+		follow = null
+		t_zoom = 30.0
+		return
 	var best := _pick_agent(pos)
 	if best:
 		select(best)
@@ -2078,11 +2235,19 @@ func _update_camera(d: float) -> void:
 	town.update_occlusion(cam.global_position, pivot.global_position)
 	# sembunyikan dinding luar yang menghalangi kamera
 	var cd := Vector3(sin(yaw), 0, cos(yaw))
+	if not exterior and zoom > EXT_ENTER:
+		_set_exterior(true)
+	elif exterior and zoom < EXT_LEAVE:
+		_set_exterior(false)
 	for f in NFLOORS:
 		for sd in SIDE_N:
 			var n: Node3D = ext_walls[f][sd]
 			var nv: Vector3 = SIDE_N[sd]
-			n.visible = nv.dot(cd) < 0.3
+			n.visible = exterior or nv.dot(cd) < 0.3
+	# atap turun saat tampak luar, terangkat lalu hilang saat zoom in
+	_roof_drop = lerpf(_roof_drop, 0.0 if exterior else 8.0, 1.0 - exp(-7.0 * d))
+	roof.position.y = _roof_drop
+	roof.visible = _roof_drop < 7.5
 
 
 # ---------- UI ----------
@@ -2136,7 +2301,7 @@ func _build_ui() -> void:
 	cl.add_child(ui)
 
 	var help := Label.new()
-	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3 atau PgUp/PgDn: lantai  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  Enter: perintah"
+	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3: lantai  ·  0 / zoom out: tampak luar  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  Enter: perintah"
 	help.add_theme_font_size_override("font_size", 12)
 	help.position = Vector2(12, 6)
 	ui.add_child(help)
@@ -2190,7 +2355,7 @@ func _build_ui() -> void:
 		b.text = "Lantai %d" % (i + 1) if i < 2 else "Lantai 3 · Founder"
 		b.toggle_mode = true
 		b.focus_mode = Control.FOCUS_NONE
-		b.pressed.connect(set_view_floor.bind(i))
+		b.pressed.connect(go_floor.bind(i))
 		fb.add_child(b)
 		floor_btns.append(b)
 	bridge_label = Label.new()
@@ -2242,8 +2407,9 @@ func _on_js_command(args: Array) -> void:
 			if a:
 				focus_agent(a)
 		"floor":
-			follow = null
-			set_view_floor(int(arg))
+			go_floor(int(arg))
+		"exterior":
+			go_exterior()
 		"pixel":
 			_pix_i = clampi(int(arg), 0, PIXEL_LINES.size() - 1)
 			_apply_pixel_mode()
@@ -2267,7 +2433,7 @@ func _push_web_state() -> void:
 	for a in agents:
 		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
 			"color": a.shirt_color.to_html(false)})
-	var st := {"agents": list, "floor": view_floor, "pixel": _pix_i, "feedback": feedback.text,
+	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
@@ -2374,10 +2540,10 @@ func _process(d: float) -> void:
 			set_view_floor(follow.floor_index())
 		t_pivot = Vector3(follow.position.x, view_floor * FH, follow.position.z)
 	for a in agents:
-		a.visible = a.floor_index() <= view_floor
+		a.visible = exterior or a.floor_index() <= view_floor
 	for wl in world_labels:
 		var bob: Node3D = wl["bob"]
-		bob.visible = wl["floor"] == view_floor
+		bob.visible = not exterior and wl["floor"] == view_floor
 		var base: Vector3 = wl["pos"] + Vector3(0, -0.4, 0)
 		bob.position = base + Vector3(0, sin(Time.get_ticks_msec() / 400.0 + base.x) * 0.1, 0)
 		bob.rotation.y += d * 1.2
