@@ -10,6 +10,7 @@ module.exports = (req, res) => {
 		DAILY_API_KEY: info("DAILY_API_KEY"),
 		SUPABASE_URL: info("SUPABASE_URL"),
 		SUPABASE_ANON_KEY: info("SUPABASE_ANON_KEY"),
+		SUPABASE_PUBLISHABLE_KEY: info("SUPABASE_PUBLISHABLE_KEY"),
 		similar_names: similar,
 		vercel_env: env.VERCEL_ENV || null,
 		commit: (env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || null,
