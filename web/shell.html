@@ -842,7 +842,7 @@ document.addEventListener("fullscreenchange", () => {
 // Pesan pemain lain diteruskan ke Godot lewat ovCommand("net_state"); daftar online lewat "net_online".
 // Tanpa konfigurasi Supabase (/api/net-config kosong) dipakai BroadcastChannel: hanya antar-tab
 // di browser yang sama, berguna untuk tes lokal.
-const SUPABASE_JS = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
+const SUPABASE_JS = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
 // chat: {k, name, text}. Pesan sendiri langsung ditampilkan (broadcast self: false).
 function chatShow(m) {
 	if (!m || !m.text || !FOUNDERS.some((f) => f[2] === m.k)) return;
