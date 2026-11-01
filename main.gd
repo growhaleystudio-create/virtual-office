@@ -124,6 +124,11 @@ var me_key := ""
 ## Multiplayer: founder yang sedang online di perangkat lain (key -> true). Karakternya
 ## digerakkan oleh pesan dari halaman web (Supabase Realtime), bukan oleh komputer ini.
 var net_online := {}
+## Tamu yang punya karakter: `me` = karakter tamu (web_guest tetap true: lantai 3, perintah, meeting
+## dan bot tetap terkunci). guest_npcs = tamu lain yang online (key "g:<id>").
+var me_is_guest := false
+var guest_npcs := {}
+const GUEST_MAX := 30
 var _net_hb := 0.0
 ## Detail lingkungan. Penuh = kota (NPC, kendaraan, gedung tetangga) + bayangan.
 ## Ringan = hanya kantor & halaman, tanpa bayangan (untuk HP / laptop lemah).
@@ -1397,6 +1402,10 @@ func _me_command(t: String) -> String:
 func set_founder(key: String) -> void:
 	if me and key == me_key:
 		return
+	if me_is_guest:
+		if key == "":
+			return  # tamu bukan founder: tidak ada yang perlu dikeluarkan
+		_clear_guest()
 	if me:
 		me.set_selected(false)
 		if me.plumbob:
@@ -2386,9 +2395,11 @@ func _click(pos: Vector2) -> void:
 		var sub: String = rm["sub"]
 		show_feedback("%s · Lantai %d%s" % [rm["name"], rm["floor"] + 1, ("  ·  " + sub.get_slice("\n", 0)) if sub != "" else ""])
 		return
-	if web_guest:
-		show_feedback("Mode tamu: hanya melihat. Founder bisa Masuk untuk menggerakkan karakter.")
+	if web_guest and me == null:
+		show_feedback("Mode tamu: klik Masuk Tamu untuk punya karakter, atau Masuk Founder.")
 		return
+	if web_guest:
+		select(me)  # tamu hanya bisa menggerakkan karakternya sendiri
 	if view_floor == 2 and selected != me:
 		show_feedback("Karyawan tidak naik ke lantai 3 (khusus founder)")
 		return
@@ -2602,6 +2613,8 @@ func _on_js_command(args: Array) -> void:
 			go_room(arg)
 		"founder":
 			set_founder(arg)
+		"guest":
+			set_guest(arg)
 		"me":
 			if me:
 				focus_agent(me)
@@ -2667,9 +2680,14 @@ func _push_web_state() -> void:
 	var online := {}
 	for k in net_online:
 		online[k] = room_of(founder_npcs[k])
-	if me:
+	if me and not me_is_guest:
 		online[me_key] = room_of(me)
-	var st := {"founders": online, "agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "founder": me.agent_name if me else "", "me_room": room_of(me) if me else "", "guest": web_guest, "pixel": _pix_i, "feedback": feedback.text,
+	var guests := []
+	for k in guest_npcs:
+		guests.append({"name": guest_npcs[k].agent_name, "room": room_of(guest_npcs[k])})
+	if me_is_guest:
+		guests.push_front({"name": me.agent_name + " (kamu)", "room": room_of(me)})
+	var st := {"me_pos": [snappedf(me.position.x, 0.1), snappedf(me.position.z, 0.1)] if me else [], "guests": guests, "me_guest": me_is_guest, "founders": online, "agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "founder": me.agent_name if me else "", "me_room": room_of(me) if me else "", "guest": web_guest, "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
@@ -2787,6 +2805,11 @@ func _process(d: float) -> void:
 	for key in founder_npcs:
 		var fa: Agent = founder_npcs[key]
 		fa.visible = exterior or fa.floor_index() <= view_floor
+	for key in guest_npcs:
+		var ga: Agent = guest_npcs[key]
+		ga.visible = exterior or ga.floor_index() <= view_floor
+	if me_is_guest:
+		me.visible = exterior or me.floor_index() <= view_floor
 	for wl in world_labels:
 		var bob: Node3D = wl["bob"]
 		bob.visible = not exterior and wl["floor"] == view_floor
@@ -2860,6 +2883,8 @@ func _maybe_screenshot() -> void:
 						var gc := Vector2i(gx, gz)
 						row += "?" if not grids[gf].is_in_boundsv(gc) else ("#" if grids[gf].is_point_solid(gc) else ("L" if gc in [LANDING[0], LANDING[1], Vector2i(STAIR_X1, STAIR2_Z), Vector2i(STAIR_X0 - 1, STAIR2_Z)] else "."))
 					print("z%02d %s" % [gz, row])
+			elif c.begins_with("guest "):
+				set_guest(JSON.stringify({"id": "test1234", "name": c.trim_prefix("guest ")}))
 			elif c.begins_with("where"):
 				print("me:", me.position if me else "-", " room:", room_of(me) if me else "-", " status:", me.status if me else "-")
 			elif c.begins_with("chat "):
@@ -2886,7 +2911,7 @@ func _net_send() -> void:
 		return
 	var win := JavaScriptBridge.get_interface("window")
 	if win and win.ovNetSend:
-		win.ovNetSend(JSON.stringify({"k": me_key, "s": me.net_state()}))
+		win.ovNetSend(JSON.stringify({"k": me_key, "n": me.agent_name, "s": me.net_state()}))
 
 
 func _on_founder_move(a: Agent) -> void:
@@ -2899,19 +2924,43 @@ func _net_receive(json: String) -> void:
 	if not (m is Dictionary):
 		return
 	var k := str(m.get("k", ""))
-	if k == me_key or not founder_npcs.has(k) or not (m.get("s") is Dictionary):
+	if k == me_key or not (m.get("s") is Dictionary):
+		return
+	if k.begins_with("g:"):
+		var g := _guest_npc(k, str(m.get("n", "Tamu")))
+		if g:
+			g.apply_net_state(m["s"])
+		return
+	if not founder_npcs.has(k):
 		return
 	if not net_online.has(k):
 		_net_mark_online(k)
 	founder_npcs[k].apply_net_state(m["s"])
 
 
-## Daftar founder online (dipisah koma) dari presence Supabase.
-func _net_set_online(csv: String) -> void:
+## Daftar yang online dari presence Supabase: JSON [{k, n}] (founder & tamu).
+func _net_set_online(json: String) -> void:
 	var now := {}
-	for k in csv.split(",", false):
-		if founder_npcs.has(k) and k != me_key:
+	var guests_now := {}
+	var arr = JSON.parse_string(json)
+	if not (arr is Array):
+		return
+	for e in arr:
+		if not (e is Dictionary):
+			continue
+		var k := str(e.get("k", ""))
+		if k == me_key:
+			continue
+		if founder_npcs.has(k):
 			now[k] = true
+		elif k.begins_with("g:"):
+			guests_now[k] = str(e.get("n", "Tamu"))
+	for k in guest_npcs.keys():
+		if not guests_now.has(k):
+			guest_npcs[k].queue_free()
+			guest_npcs.erase(k)
+	for k in guests_now:
+		_guest_npc(k, guests_now[k])
 	for k in net_online.keys():
 		if not now.has(k):
 			net_online.erase(k)
@@ -3045,13 +3094,18 @@ func _me_walk(v: Vector2, d: float) -> void:
 		return  # sedang naik/turun tangga: biarkan selesai
 	var f := me.floor_index()
 	var dir := Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw)
-	var step := dir * WALK_SPEED * d
-	var stuck := not _walkable(me.position, f)  # mis. masih di kursi: boleh keluar
-	for cand in [step, Vector3(step.x, 0, 0), Vector3(0, 0, step.z)]:
-		var np: Vector3 = me.position + cand
-		if stuck or _walkable(np, f):
-			me.position = np
-			break
+	# langkah dipecah kecil (<= 0.04 dtk) supaya frame lambat tidak menembus dinding
+	var left := minf(d, 0.25)
+	while left > 0.0:
+		var dt := minf(left, 0.04)
+		left -= dt
+		var step := dir * WALK_SPEED * dt
+		var stuck := not _walkable(me.position, f)  # mis. masih di kursi: boleh keluar
+		for cand in [step, Vector3(step.x, 0, 0), Vector3(0, 0, step.z)]:
+			var np: Vector3 = me.position + cand
+			if stuck or _walkable(np, f):
+				me.position = np
+				break
 	me.step_manual(dir)
 	follow = me
 	_walk_keys = true
@@ -3065,7 +3119,7 @@ func _me_walk(v: Vector2, d: float) -> void:
 
 ## Berjalan ke arah anak tangga di dekatnya -> naik/turun otomatis.
 func _try_stairs(dir: Vector3, f: int) -> bool:
-	for lo in [0, 1]:
+	for lo in ([0] if me_is_guest else [0, 1]):
 		var ln := _stair_link(lo)
 		var lo_e: Vector3 = ln["lo_end"]
 		var hi_e: Vector3 = ln["hi_end"]
@@ -3089,3 +3143,77 @@ func _try_stairs(dir: Vector3, f: int) -> bool:
 			me.begin_move(path, "stand", me.rotation.y, "diam")
 			return true
 	return false
+
+
+# ---------- karakter tamu ----------
+
+func _make_guest(name_: String, seed_: String) -> Agent:
+	var h := absi(seed_.hash())
+	var hairs := [Color(0.12, 0.09, 0.07), Color(0.35, 0.20, 0.10), Color(0.72, 0.55, 0.28), Color(0.20, 0.12, 0.08), Color(0.55, 0.25, 0.15)]
+	var g := Agent.new()
+	g.setup(name_, Color.from_hsv(float(h % 360) / 360.0, 0.5, 0.88), hairs[(h / 360) % hairs.size()])
+	g.title = "Tamu"
+	g.think = 1e9
+	add_child(g)
+	g.position = _guest_spawn()
+	return g
+
+
+## Titik muncul tamu: sel kosong acak di sekitar lobby lantai 1.
+func _guest_spawn() -> Vector3:
+	var base := Vector2i(W / 2, H - 4)
+	for r in rooms:
+		if r["floor"] == 0 and str(r["name"]).to_lower().contains("lobby"):
+			base = world_to_cell(Vector3(r["x"], 0, r["z"]))
+	var c := nearest_free(base + Vector2i(randi_range(-2, 2), randi_range(-1, 1)), 0)
+	return cell_to_world(c, 0)
+
+
+## Tamu lain (dibuat saat pertama terlihat di presence / pesan posisi).
+func _guest_npc(k: String, name_: String) -> Agent:
+	if guest_npcs.has(k):
+		return guest_npcs[k]
+	if guest_npcs.size() >= GUEST_MAX:
+		return null
+	var g := _make_guest(name_.strip_edges().left(20), k)
+	var bob := Agent.make_plumbob(g, 0.32, Color(0.85, 0.27, 0.5))
+	bob.position.y = 2.35
+	g.plumbob = bob
+	guest_npcs[k] = g
+	return g
+
+
+## Masuk sebagai tamu ({id, name}) atau keluar ("" / id kosong).
+func set_guest(json: String) -> void:
+	var m = JSON.parse_string(json) if json != "" else null
+	if me and not me_is_guest:
+		return  # founder sudah masuk
+	if me_is_guest:
+		if m is Dictionary and "g:" + str(m.get("id", "")) == me_key:
+			return
+		_clear_guest()
+	if not (m is Dictionary) or str(m.get("id", "")) == "":
+		return
+	var name_ := str(m.get("name", "Tamu")).strip_edges().left(20)
+	if name_ == "":
+		name_ = "Tamu"
+	me = _make_guest(name_, "g:" + str(m["id"]))
+	me_key = "g:" + str(m["id"])
+	me_is_guest = true
+	me.plumbob = Agent.make_plumbob(me, 0.42, Color(1.0, 0.82, 0.25))
+	me.plumbob.position.y = 2.35
+	if view_floor >= 2:
+		set_view_floor(0)
+	focus_agent(me)
+	show_feedback("Halo %s! Jalan pakai WASD atau klik lantai. Lantai 3 khusus founder." % name_)
+	_net_send()
+
+
+func _clear_guest() -> void:
+	if me_is_guest and me:
+		me.queue_free()
+	me = null
+	me_key = ""
+	me_is_guest = false
+	follow = null
+	select(agents[0])

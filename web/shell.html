@@ -44,7 +44,7 @@ header .sub { color: var(--muted); font-weight: 600; }
 header .live { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
 header .acct { flex: none; padding: 7px 14px; font-size: 13px; border-radius: 999px; }
 header .acct.in { background: var(--blue); border-color: var(--blue); }
-#login {
+.modal {
 	position: fixed;
 	inset: 0;
 	z-index: 80;
@@ -55,8 +55,8 @@ header .acct.in { background: var(--blue); border-color: var(--blue); }
 	background: rgba(10, 10, 12, 0.7);
 	backdrop-filter: blur(4px);
 }
-#login.open { display: flex; }
-#login form {
+.modal.open { display: flex; }
+.modal form {
 	width: min(380px, 100%);
 	background: var(--panel);
 	border: 1px solid var(--line);
@@ -67,10 +67,10 @@ header .acct.in { background: var(--blue); border-color: var(--blue); }
 	gap: 10px;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 }
-#login h2 { margin: 0; font-size: 18px; }
-#login p { margin: 0 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
-#login label { font-size: 12px; color: var(--muted); font-weight: 600; }
-#login input {
+.modal h2 { margin: 0; font-size: 18px; }
+.modal p { margin: 0 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.modal label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.modal input {
 	font: inherit;
 	font-size: 16px;
 	color: var(--text);
@@ -79,12 +79,14 @@ header .acct.in { background: var(--blue); border-color: var(--blue); }
 	border-radius: 8px;
 	padding: 10px 12px;
 }
-#login input:focus { outline: none; border-color: var(--blue); }
-#login .err { color: #ff9a9a; font-size: 13px; min-height: 18px; }
-#login .row2 { display: flex; gap: 8px; margin-top: 4px; }
-#login .row2 .primary { background: var(--blue); border-color: var(--blue); }
+.modal input:focus { outline: none; border-color: var(--blue); }
+.modal .err { color: #ff9a9a; font-size: 13px; min-height: 18px; }
+.modal .row2 { display: flex; gap: 8px; margin-top: 4px; }
+.modal .row2 .primary { background: var(--blue); border-color: var(--blue); }
 .row.me-row { display: none; }
-body.is-founder .row.me-row { display: flex; }
+body.is-founder .row.me-row, body.is-guest .row.me-row { display: flex; }
+body.is-founder #guest-btn { display: none; }
+#guest-btn.in { background: #DA457F; border-color: #DA457F; }
 #floors button.locked::after { content: " \1F512"; }
 header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .layout {
@@ -387,10 +389,24 @@ $GODOT_HEAD_INCLUDE
 		<button id="t-focus" title="Sembunyikan semua panel, frame jadi besar">Layar Lebar</button>
 	</div>
 	<div class="live"><span class="dot"></span><span id="mode">Memuat kantor...</span></div>
+	<button class="acct" id="guest-btn" title="Punya karakter sendiri sebagai tamu">Masuk Tamu</button>
 	<button class="acct" id="acct">Masuk Founder</button>
 </header>
 
-<div id="login">
+<div id="guestm" class="modal">
+	<form id="guest-form" autocomplete="off">
+		<h2>Masuk sebagai Tamu</h2>
+		<p>Kamu dapat karakter sendiri di Lobby dan bisa jalan pakai WASD atau klik lantai. Lantai 3, perintah, meeting &amp; bot khusus founder.</p>
+		<label for="gs-name">Nama kamu</label>
+		<input id="gs-name" maxlength="20" placeholder="mis. Budi" required>
+		<div class="row2">
+			<button type="button" id="gs-cancel">Batal</button>
+			<button type="submit" class="primary">Masuk</button>
+		</div>
+	</form>
+</div>
+
+<div id="login" class="modal">
 	<form id="login-form" autocomplete="on">
 		<h2>Masuk Founder</h2>
 		<p>Khusus founder Growhaley. Tamu tetap bisa melihat kantor tanpa masuk.</p>
@@ -419,6 +435,10 @@ $GODOT_HEAD_INCLUDE
 		<div class="card">
 			<h3>Founder <span id="net-info">Lantai 3</span></h3>
 			<div id="founders"></div>
+		</div>
+		<div class="card" id="guests-card" hidden>
+			<h3>Tamu <span id="guest-count"></span></h3>
+			<div id="guests"></div>
 		</div>
 	</aside>
 
@@ -652,11 +672,27 @@ try {
 } catch (e) { session = null; }
 let founderSynced = "";
 function isFounder() { return !!session; }
+// tamu dengan karakter: {id, name} di localStorage "ov-guest"
+let guest = null;
+try { guest = JSON.parse(localStorage.getItem("ov-guest")); if (!guest || !guest.id) guest = null; } catch (e) { guest = null; }
+let guestSynced = "";
+function isGuestChar() { return !isFounder() && !!guest; }
+function syncGuest() {
+	const want = isGuestChar() ? JSON.stringify(guest) : "";
+	if (window.ovCommand && guestSynced !== want) {
+		guestSynced = want;
+		send("guest", want);
+	}
+}
 function applyAccount() {
 	document.body.classList.toggle("is-founder", isFounder());
 	$("acct").textContent = isFounder() ? session.name + " · Keluar" : "Masuk Founder";
 	$("acct").classList.toggle("in", isFounder());
-	$("me-name").textContent = isFounder() ? session.name + " (kamu)" : "Kamu";
+	$("me-name").textContent = isFounder() ? session.name + " (kamu)" : isGuestChar() ? guest.name + " (kamu)" : "Kamu";
+	document.querySelector("#me-row small").textContent = isFounder() ? "Founder · karakter kamu" : "Tamu · karakter kamu";
+	document.body.classList.toggle("is-guest", isGuestChar());
+	$("guest-btn").textContent = isGuestChar() ? guest.name + " · Keluar" : "Masuk Tamu";
+	$("guest-btn").classList.toggle("in", isGuestChar());
 	$("cmd").disabled = !isFounder();
 	$("cmd").placeholder = isFounder() ? "mis. Sales ke pantry · aku ke ruanganku" : "Khusus founder, masuk dulu";
 	document.querySelectorAll("#chips .chip").forEach((c) => c.style.opacity = isFounder() ? "" : "0.45");
@@ -683,9 +719,36 @@ $("acct").onclick = () => {
 	if (inCall) leaveCall();
 	send("founder", "");
 	founderSynced = "";
+	guestSynced = "";
 	applyAccount();
+	syncGuest();
 };
 $("lg-cancel").onclick = closeLogin;
+$("guest-btn").onclick = () => {
+	if (isGuestChar()) {
+		guest = null;
+		try { localStorage.removeItem("ov-guest"); } catch (e) {}
+		applyAccount();
+		syncGuest();
+		return;
+	}
+	$("guestm").classList.add("open");
+	setTimeout(() => $("gs-name").focus(), 50);
+};
+$("gs-cancel").onclick = () => { $("guestm").classList.remove("open"); $("canvas").focus(); };
+$("guestm").onclick = (e) => { if (e.target === $("guestm")) $("gs-cancel").onclick(); };
+$("guest-form").onsubmit = (e) => {
+	e.preventDefault();
+	const name = $("gs-name").value.trim().replace(/\s+/g, " ").slice(0, 20);
+	if (!name) return;
+	guest = { id: Math.random().toString(36).slice(2, 10), name };
+	try { localStorage.setItem("ov-guest", JSON.stringify(guest)); } catch (e2) {}
+	$("guestm").classList.remove("open");
+	applyAccount();
+	syncGuest();
+	$("canvas").focus();
+	toGame();
+};
 $("login").onclick = (e) => { if (e.target === $("login")) closeLogin(); };
 $("login-form").onsubmit = async (e) => {
 	e.preventDefault();
@@ -956,29 +1019,38 @@ function salesOnStatus(p) {
 	salesRefresh();
 }
 window.ovNetSend = function (json) {
-	if (!isFounder()) return;
+	if (!myNetKey()) return;
 	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "st", payload: { j: json } });
 	else if (net.bc) net.bc.postMessage({ t: "st", j: json });
 };
-function netSetOnline(keys) {
-	const list = [...new Set(keys)].filter((k) => FOUNDERS.some((f) => f[2] === k)).sort();
-	if (list.join() === net.online.join() && net.godot) return;
+// entries: [{k, n}] founder (key founder) & tamu (key "g:<id>")
+function netSetOnline(entries) {
+	const seen = {};
+	for (const e of entries) {
+		if (FOUNDERS.some((f) => f[2] === e.k) || /^g:[a-z0-9]{4,16}$/.test(e.k)) seen[e.k] = e.n || "";
+	}
+	const list = Object.keys(seen).sort().map((k) => ({ k, n: seen[k] }));
+	const sig = JSON.stringify(list);
+	if (sig === net.onlineSig && net.godot) return;
 	net.online = list;
+	net.onlineSig = sig;
 	if (window.ovCommand) {
 		net.godot = true;
-		send("net_online", list.join(","));
+		send("net_online", sig);
 	}
 }
+function myNetKey() { return isFounder() ? session.key : isGuestChar() ? "g:" + guest.id : ""; }
+function myNetName() { return isFounder() ? session.name : isGuestChar() ? guest.name : ""; }
 function netTrack() {
-	const want = isFounder() ? session.key : "";
+	const want = myNetKey();
 	if (want === net.tracked) return;
 	if (net.ch && net.ok) {
 		net.tracked = want;
-		if (want) net.ch.track({ key: want, name: session.name });
+		if (want) net.ch.track({ key: want, name: myNetName() });
 		else net.ch.untrack();
 	} else if (net.bc) {
 		net.tracked = want;
-		net.bc.postMessage({ t: want ? "hi" : "bye", key: want || net.lastKey, id: net.id });
+		net.bc.postMessage({ t: want ? "hi" : "bye", key: want || net.lastKey, name: myNetName(), id: net.id });
 		net.lastKey = want;
 	}
 }
@@ -1010,7 +1082,7 @@ async function netStart() {
 				const keys = [];
 				let bot = false;
 				for (const metas of Object.values(ch.presenceState())) for (const m of metas) {
-					if (m.key) keys.push(m.key);
+					if (m.key) keys.push({ k: String(m.key), n: String(m.name || "").slice(0, 20) });
 					if (m.bot === "sales") bot = true;
 				}
 				netSetOnline(keys);
@@ -1042,20 +1114,20 @@ async function netStart() {
 		else if (m.t === "chat") chatShow(m.m);
 		else if (m.t === "hello") {
 			send("net_sync");
-			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
 		}
 		else if (m.t === "hi") {
 			const fresh = !net.seen[m.id];
-			net.seen[m.id] = { key: m.key, at: Date.now() };
+			net.seen[m.id] = { key: m.key, name: m.name, at: Date.now() };
 			if (fresh) {
 				send("net_sync");
-				if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+				if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
 			}
 		} else if (m.t === "bye") delete net.seen[m.id];
 		netLocalOnline();
 	};
 	setInterval(() => {
-		if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+		if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
 		netLocalOnline();
 	}, 3000);
 	addEventListener("pagehide", () => net.tracked && net.bc.postMessage({ t: "bye", id: net.id }));
@@ -1072,16 +1144,41 @@ function netLocalOnline() {
 	const keys = [];
 	for (const [id, v] of Object.entries(net.seen)) {
 		if (now - v.at > 8000) delete net.seen[id];
-		else if (v.key) keys.push(v.key);
+		else if (v.key) keys.push({ k: v.key, n: v.name || "" });
 	}
 	netSetOnline(keys);
 }
 netStart();
 
+function renderGuests(list) {
+	$("guests-card").hidden = list.length === 0;
+	const txt = list.length + " online";
+	if ($("guest-count").textContent !== txt) $("guest-count").textContent = txt;
+	const box = $("guests");
+	while (box.childElementCount > list.length) box.lastChild.remove();
+	list.forEach((g, i) => {
+		let r = box.children[i];
+		if (!r) {
+			r = el("div", "row");
+			const sw = el("span", "swatch");
+			sw.style.background = "#DA457F";
+			const who = el("div", "who");
+			r.nm = el("b");
+			r.st = el("div", "status");
+			who.append(r.nm, r.st);
+			r.append(sw, who);
+			box.append(r);
+		}
+		if (r.nm.textContent !== g.name) r.nm.textContent = g.name;
+		if (r.st.textContent !== g.room) r.st.textContent = g.room;
+	});
+}
+
 // state dari Godot (dipanggil berkala)
 let lastFeedback = "";
 const rows = {};
 window.ovUpdate = function (s) {
+	window.ovLast = s;
 	$("mode").textContent = s.online;
 	$("team-count").textContent = s.agents.length + " orang";
 	// baris dibuat sekali lalu hanya teksnya yang diperbarui (supaya klik tidak hilang)
@@ -1107,6 +1204,8 @@ window.ovUpdate = function (s) {
 	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
 	syncFounder();
+	syncGuest();
+	renderGuests(s.guests || []);
 	if (!net.godot) {
 		netSetOnline(net.online);
 		netHello();
