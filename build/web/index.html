@@ -166,6 +166,7 @@ button {
 }
 button:hover { border-color: var(--blue-l); }
 button.on { background: var(--blue); border-color: var(--blue); }
+button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line); }
 .cmd { display: flex; gap: 6px; }
 .cmd input {
 	flex: 1;
@@ -210,6 +211,53 @@ button.on { background: var(--blue); border-color: var(--blue); }
 .about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
 .log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
+/* video meeting (Daily) */
+.meet-cta {
+	position: absolute;
+	left: 50%;
+	bottom: 14px;
+	transform: translateX(-50%);
+	z-index: 3;
+	flex: none;
+	display: none;
+	padding: 10px 18px;
+	border-radius: 999px;
+	background: var(--pink);
+	border-color: var(--pink);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+	white-space: nowrap;
+}
+body.in-meet-room:not(.in-call) .meet-cta { display: block; }
+.meet-info { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0 0 10px; }
+#call {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	z-index: 60;
+	width: min(520px, calc(100vw - 32px));
+	height: min(380px, calc(100dvh - 32px));
+	display: none;
+	flex-direction: column;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	overflow: hidden;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+body.in-call #call { display: flex; }
+#call.big { width: min(960px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 32px)); }
+#call.mini { height: 46px; }
+#call .bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--line); min-height: 46px; }
+#call .bar b { font-size: 13px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#call .bar b.warn { color: #ffcf6e; }
+#call .bar button { flex: none; padding: 5px 10px; font-size: 12px; }
+#call .bar button.leave { background: #c0392b; border-color: #c0392b; }
+#call iframe { flex: 1; width: 100%; border: 0; background: #111; }
+@media (max-width: 760px) {
+	#call, #call.big { right: 0; left: 0; bottom: 0; width: 100%; height: 58dvh; border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+	#call.mini { height: calc(46px + env(safe-area-inset-bottom)); }
+	#call .bar .size { display: none; }
+}
 .tabs { display: none; }
 @media (max-width: 1100px) {
 	body { overflow: auto; }
@@ -306,6 +354,7 @@ button.on { background: var(--blue); border-color: var(--blue); }
 				<progress id="status-progress"></progress>
 				<div id="status-notice"></div>
 			</div>
+			<button class="meet-cta" id="meet-cta">Gabung Video Meeting</button>
 			<button class="fs-btn" id="fs" title="Layar penuh" aria-label="Layar penuh">
 				<svg class="ic-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
 				<svg class="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
@@ -341,6 +390,14 @@ button.on { background: var(--blue); border-color: var(--blue); }
 				<button data-d="1">Penuh</button>
 			</div>
 			<p class="hint">Ringan: hanya kantor, cocok untuk HP / laptop lama. Penuh: kota, NPC &amp; kendaraan.</p>
+		</div>
+		<div class="card">
+			<h3>Video Meeting <span id="meet-where">gratis</span></h3>
+			<p class="meet-info" id="meet-info">Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.</p>
+			<div class="btns">
+				<button id="go-meet">Ke Ruang Meeting</button>
+				<button id="join-meet" disabled>Gabung</button>
+			</div>
 		</div>
 		<div class="card">
 			<h3>Perintah</h3>
@@ -385,6 +442,15 @@ button.on { background: var(--blue); border-color: var(--blue); }
 			<a href="https://growhaley.com" target="_blank" rel="noopener">growhaley.com →</a>
 		</div>
 	</aside>
+</div>
+
+<div id="call" role="dialog" aria-label="Video meeting">
+	<div class="bar">
+		<b id="call-title">Video Meeting</b>
+		<button class="size" id="call-size" title="Perbesar / perkecil">Besar</button>
+		<button id="call-mini" title="Lipat / buka">Lipat</button>
+		<button class="leave" id="call-leave">Keluar</button>
+	</div>
 </div>
 
 <script>
@@ -461,6 +527,80 @@ $("t-focus").onclick = () => {
 	setPanels(allHidden, allHidden);
 };
 
+// ---------- video meeting (Daily Prebuilt) ----------
+// Hanya bisa dibuka saat kamera ada di ruang meeting; keluar ruangan -> call ditutup setelah hitung mundur.
+const MEET_URL = "https://virtualofficewhaley.daily.co/meeting";
+const LEAVE_GRACE = 8;
+let meetRoom = "";
+let inCall = false;
+let leaveTimer = null;
+let leaveLeft = 0;
+function setCallTitle() {
+	const t = $("call-title");
+	if (leaveTimer) {
+		t.textContent = "Keluar ruangan, call ditutup dalam " + leaveLeft + " dtk";
+		t.className = "warn";
+	} else {
+		t.textContent = "Video Meeting · " + (meetRoom || "Ruang Meeting");
+		t.className = "";
+	}
+}
+function joinCall() {
+	if (!meetRoom || inCall) return;
+	const f = document.createElement("iframe");
+	f.allow = "camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-write";
+	f.src = MEET_URL;
+	$("call").append(f);
+	$("call").classList.remove("mini");
+	inCall = true;
+	document.body.classList.add("in-call");
+	setCallTitle();
+}
+function leaveCall() {
+	const f = document.querySelector("#call iframe");
+	if (f) f.remove();
+	inCall = false;
+	document.body.classList.remove("in-call");
+	clearInterval(leaveTimer);
+	leaveTimer = null;
+	$("canvas").focus();
+}
+function onMeetRoom(name) {
+	if (name === meetRoom) return;
+	meetRoom = name;
+	document.body.classList.toggle("in-meet-room", !!name);
+	$("join-meet").disabled = !name;
+	$("meet-where").textContent = name || "gratis";
+	$("meet-info").textContent = name
+		? "Kamu di " + name + ". Klik Gabung untuk masuk video call (izinkan kamera & mikrofon)."
+		: "Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.";
+	if (!inCall) return;
+	if (name) {
+		clearInterval(leaveTimer);
+		leaveTimer = null;
+	} else if (!leaveTimer) {
+		leaveLeft = LEAVE_GRACE;
+		leaveTimer = setInterval(() => {
+			leaveLeft -= 1;
+			if (leaveLeft <= 0) leaveCall();
+			else setCallTitle();
+		}, 1000);
+	}
+	setCallTitle();
+}
+$("meet-cta").onclick = joinCall;
+$("join-meet").onclick = joinCall;
+$("go-meet").onclick = () => { send("goto", "Meeting"); toGame(); };
+$("call-leave").onclick = leaveCall;
+$("call-mini").onclick = () => {
+	const m = $("call").classList.toggle("mini");
+	$("call-mini").textContent = m ? "Buka" : "Lipat";
+};
+$("call-size").onclick = () => {
+	const b = $("call").classList.toggle("big");
+	$("call-size").textContent = b ? "Kecil" : "Besar";
+};
+
 // tab panel di HP
 function setTab(t) {
 	document.body.classList.toggle("tab-team", t === "team");
@@ -521,6 +661,7 @@ window.ovUpdate = function (s) {
 	}
 	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
+	onMeetRoom(s.meeting || "");
 	if (!detailSynced) {
 		detailSynced = true;
 		if ((detailPref === "1") !== s.detail) send("detail", detailPref);
@@ -538,7 +679,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1879104,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1880048,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 

@@ -1356,6 +1356,34 @@ func set_detail(on: bool) -> void:
 	show_feedback("Detail penuh: kota, NPC & kendaraan aktif" if on else "Mode ringan: hanya kantor, tanpa kota & NPC luar")
 
 
+## Ruang yang punya video meeting: [lantai, kotak sel (x, z, lebar, tinggi), nama].
+const MEET_ROOMS := [[0, Rect2(36, 0, 8, 9), "Ruang Meeting"], [1, Rect2(38, 0, 6, 13), "Rapat Kecil"]]
+
+
+## Nama ruang meeting yang sedang dilihat dari dekat (kamera di dalamnya), atau "".
+func meeting_here() -> String:
+	if exterior or zoom > 26.0:
+		return ""
+	var c := Vector2(t_pivot.x + W / 2.0, t_pivot.z + H / 2.0)
+	for m in MEET_ROOMS:
+		if m[0] == view_floor and (m[1] as Rect2).grow(0.5).has_point(c):
+			return m[2]
+	return ""
+
+
+## Kamera terbang ke ruangan (nama sama dengan label ruangan, mis. "Meeting").
+func go_room(room_name: String) -> bool:
+	for wl in world_labels:
+		if str(wl["name"]).to_lower() == room_name.to_lower():
+			follow = null
+			set_view_floor(wl["floor"])
+			var p: Vector3 = wl["pos"]
+			t_pivot = Vector3(p.x, wl["floor"] * FH, p.z)
+			t_zoom = 14.0
+			return true
+	return false
+
+
 ## Masuk/keluar tampak luar (dipanggil otomatis dari zoom kamera).
 func _set_exterior(on: bool) -> void:
 	exterior = on
@@ -2216,6 +2244,12 @@ func _click(pos: Vector2) -> void:
 		select(best)
 		whip(best)
 		return
+	var rm = _pick_room(pos)
+	if rm != null and not rm["small"]:
+		go_room(rm["name"])
+		var sub: String = rm["sub"]
+		show_feedback("%s · Lantai %d%s" % [rm["name"], rm["floor"] + 1, ("  ·  " + sub.get_slice("\n", 0)) if sub != "" else ""])
+		return
 	if view_floor == 2:
 		show_feedback("Lantai 3 khusus ruang founder (hanya untuk dilihat)")
 		return
@@ -2419,6 +2453,8 @@ func _on_js_command(args: Array) -> void:
 			go_floor(int(arg))
 		"exterior":
 			go_exterior()
+		"goto":
+			go_room(arg)
 		"detail":
 			if (arg == "1") != full_detail:
 				set_detail(arg == "1")
@@ -2445,7 +2481,7 @@ func _push_web_state() -> void:
 	for a in agents:
 		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
 			"color": a.shirt_color.to_html(false)})
-	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "pixel": _pix_i, "feedback": feedback.text,
+	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
