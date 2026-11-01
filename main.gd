@@ -207,7 +207,8 @@ func _build_render() -> void:
 	screen.material.set_shader_parameter("compat_fix", RenderingServer.get_current_rendering_method() == "gl_compatibility")
 	layer.add_child(screen)
 	# web: default HD (layar browser besar); desktop: retro sedang
-	_pix_i = 2 if OS.has_feature("web") else 1
+	# HP (web_android / web_ios): Sedang, karena GPU HP lebih lemah
+	_pix_i = 2 if OS.has_feature("web") and not (OS.has_feature("web_android") or OS.has_feature("web_ios")) else 1
 	get_window().size_changed.connect(_on_window_resized)
 
 
@@ -1776,7 +1777,55 @@ func _ground_point(screen_pos: Vector2) -> Variant:
 	return o + d * t
 
 
+## Sentuhan (HP/tablet). 1 jari = mouse kiri (diemulasi Godot): ketuk = klik, geser = putar.
+## 2 jari: cubit = zoom ke titik tengah jari, geser bersama = geser kamera.
+var _touches := {}
+var _pinch_dist := 0.0
+var _pinch_mid := Vector2.ZERO
+
+
+func _touch_input(e: InputEvent) -> void:
+	if e is InputEventScreenTouch:
+		if e.pressed:
+			_touches[e.index] = e.position
+		else:
+			_touches.erase(e.index)
+	elif e is InputEventScreenDrag:
+		if not _touches.has(e.index):
+			return
+		_touches[e.index] = e.position
+	else:
+		return
+	if _touches.size() < 2:
+		_pinch_dist = 0.0
+		return
+	# dua jari: batalkan klik/putar dari jari pertama
+	_ldown = false
+	var pts: Array = _touches.values()
+	var a: Vector2 = pts[0]
+	var b: Vector2 = pts[1]
+	var dist := maxf(a.distance_to(b), 1.0)
+	var mid := (a + b) / 2.0
+	if _pinch_dist > 0.0 and e is InputEventScreenDrag:
+		var old := t_zoom
+		t_zoom = clampf(t_zoom * _pinch_dist / dist, 6.0, 75.0)
+		var gp = _ground_point(mid)
+		if gp != null and follow == null:
+			var k := 1.0 - t_zoom / old
+			t_pivot.x += (gp.x - t_pivot.x) * k
+			t_pivot.z += (gp.z - t_pivot.z) * k
+		var rel := mid - _pinch_mid
+		if rel.length() > 0.5:
+			follow = null
+			t_pivot += Vector3(-rel.x, 0, -rel.y).rotated(Vector3.UP, t_yaw) * t_zoom * 0.0022
+	_pinch_dist = dist
+	_pinch_mid = mid
+
+
 func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventScreenTouch or e is InputEventScreenDrag:
+		_touch_input(e)
+		return
 	if e is InputEventMouseButton:
 		if e.button_index == MOUSE_BUTTON_LEFT:
 			if e.pressed:
@@ -1795,7 +1844,7 @@ func _unhandled_input(e: InputEvent) -> void:
 				t_pivot.x += (gp.x - t_pivot.x) * k
 				t_pivot.z += (gp.z - t_pivot.z) * k
 	elif e is InputEventMouseMotion:
-		if (e.button_mask & MOUSE_BUTTON_MASK_LEFT) and _ldown:
+		if (e.button_mask & MOUSE_BUTTON_MASK_LEFT) and _ldown and _touches.size() < 2:
 			_drag += e.relative.length()
 			if _drag >= 6.0:
 				t_yaw -= e.relative.x * 0.008

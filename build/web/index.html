@@ -2,7 +2,8 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#19191c">
 <title>Growhaley · Virtual Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -98,7 +99,41 @@ aside::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 	background: #9ecbef;
 }
-#canvas { display: block; width: 100%; height: 100%; }
+#canvas { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.fs-btn {
+	position: absolute;
+	right: 8px;
+	bottom: 8px;
+	z-index: 2;
+	flex: none;
+	width: 38px;
+	height: 38px;
+	padding: 0;
+	display: grid;
+	place-items: center;
+	background: rgba(25, 25, 28, 0.6);
+	border-color: rgba(255, 255, 255, 0.15);
+	backdrop-filter: blur(4px);
+}
+.fs-btn svg { width: 18px; height: 18px; }
+.fs-btn .ic-close, body.immersive .fs-btn .ic-open { display: none; }
+body.immersive .fs-btn .ic-close { display: block; }
+/* mode layar penuh: kanvas memenuhi layar (tetap 16:9) */
+body.immersive .frame {
+	position: fixed;
+	inset: 0;
+	z-index: 50;
+	width: auto;
+	aspect-ratio: auto;
+	border: 0;
+	border-radius: 0;
+	background: #000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+body.immersive #canvas { width: min(100vw, 100dvh * 16 / 9); height: auto; aspect-ratio: 16 / 9; }
+body.immersive .fs-btn { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); }
 #canvas:focus { outline: none; }
 #status {
 	position: absolute;
@@ -155,6 +190,11 @@ button.on { background: var(--blue); border-color: var(--blue); }
 }
 .chip:hover { color: var(--text); }
 .keys { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; line-height: 1.9; }
+.keys.touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+	.keys.mouse { display: none; }
+	.keys.touch { display: block; }
+}
 .keys kbd {
 	font-family: inherit;
 	font-size: 11px;
@@ -168,11 +208,63 @@ button.on { background: var(--blue); border-color: var(--blue); }
 .about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
 .log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.tabs { display: none; }
 @media (max-width: 1100px) {
 	body { overflow: auto; }
-	.layout { grid-template-columns: 1fr; height: auto; }
-	.stage { order: -1; }
-	.frame { width: 100%; }
+	.layout, body.hide-left .layout, body.hide-right .layout, body.hide-left.hide-right .layout { grid-template-columns: 1fr 1fr; height: auto; }
+	body.hide-left aside.left, body.hide-right aside.right { visibility: visible; }
+	.toggles { display: none; }
+	.stage { order: -1; grid-column: 1 / -1; }
+	.frame { width: min(100%, calc((100dvh - 56px - 60px) * 16 / 9)); }
+	aside { overflow: visible; }
+}
+/* HP: satu kolom, game menempel di atas, panel dipilih lewat tab */
+@media (max-width: 760px) {
+	body { font-size: 15px; }
+	header { padding: env(safe-area-inset-top) 14px 0; height: calc(48px + env(safe-area-inset-top)); }
+	header .sub { display: none; }
+	header .brand { font-size: 16px; }
+	header .live { font-size: 12px; }
+	.layout, body.hide-left .layout, body.hide-right .layout, body.hide-left.hide-right .layout {
+		grid-template-columns: 1fr;
+		padding: 0 0 calc(16px + env(safe-area-inset-bottom));
+		gap: 0;
+	}
+	.stage {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		background: var(--ink);
+		padding: 8px 10px 0;
+		gap: 4px;
+	}
+	.frame { width: 100%; border-radius: 10px; }
+	.feedback { font-size: 12px; min-height: 18px; padding: 0 4px 6px; }
+	.tabs {
+		display: flex;
+		gap: 4px;
+		margin: 0 -10px;
+		padding: 6px 10px 8px;
+		width: calc(100% + 20px);
+		border-bottom: 1px solid var(--line);
+	}
+	.tabs button { padding: 9px 6px; }
+	aside { padding: 12px 10px 0; gap: 10px; }
+	body:not(.tab-team) aside.left, body.tab-team aside.right { display: none; }
+	.cmd input { font-size: 16px; } /* cegah zoom otomatis iOS */
+	.row { padding: 10px 8px; }
+	.chip { font-size: 13px; padding: 7px 11px; }
+	.log { max-height: 200px; }
+}
+/* HP mendatar: game setinggi layar */
+@media (max-height: 500px) and (orientation: landscape) {
+	header { display: none; }
+	.layout, body.hide-left .layout, body.hide-right .layout, body.hide-left.hide-right .layout { grid-template-columns: 1fr; padding: 8px; height: auto; }
+	.stage { position: static; }
+	.frame { width: min(100%, calc((100dvh - 16px) * 16 / 9)); }
+	.tabs { display: flex; gap: 4px; width: 100%; }
+	body:not(.tab-team) aside.left, body.tab-team aside.right { display: none; }
+	aside { overflow: visible; }
 }
 </style>
 <link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
@@ -212,8 +304,16 @@ button.on { background: var(--blue); border-color: var(--blue); }
 				<progress id="status-progress"></progress>
 				<div id="status-notice"></div>
 			</div>
+			<button class="fs-btn" id="fs" title="Layar penuh" aria-label="Layar penuh">
+				<svg class="ic-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+				<svg class="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+			</button>
 		</div>
-		<div class="feedback" id="feedback">Klik karakter atau nama di panel Tim untuk melihat mereka.</div>
+		<div class="feedback" id="feedback">Ketuk karakter atau nama di panel Tim untuk melihat mereka.</div>
+		<div class="tabs" id="tabs">
+			<button data-t="ctrl" class="on">Kontrol</button>
+			<button data-t="team">Tim &amp; Founder</button>
+		</div>
 	</section>
 
 	<aside class="right">
@@ -252,7 +352,14 @@ button.on { background: var(--blue); border-color: var(--blue); }
 		</div>
 		<div class="card">
 			<h3>Kontrol</h3>
-			<ul class="keys">
+			<ul class="keys touch">
+				<li><kbd>Ketuk</kbd> pilih karakter / jalan ke titik</li>
+				<li><kbd>Geser 1 jari</kbd> putar kamera</li>
+				<li><kbd>Geser 2 jari</kbd> geser kamera</li>
+				<li><kbd>Cubit</kbd> zoom</li>
+				<li><kbd>⤢</kbd> layar penuh (miringkan HP)</li>
+			</ul>
+			<ul class="keys mouse">
 				<li><kbd>Klik</kbd> pilih karakter / jalan ke titik</li>
 				<li><kbd>Tahan kiri</kbd> putar kamera</li>
 				<li><kbd>Tahan kanan</kbd> geser kamera</li>
@@ -300,7 +407,7 @@ for (const [name, role, key] of FOUNDERS) {
 	const who = el("div", "who");
 	who.append(el("b", "", name), el("small", "", role));
 	r.append(img, who);
-	r.onclick = () => send("room", name);
+	r.onclick = () => { send("room", name); toGame(); };
 	$("founders").append(r);
 }
 
@@ -334,6 +441,38 @@ $("t-focus").onclick = () => {
 	setPanels(allHidden, allHidden);
 };
 
+// tab panel di HP
+function setTab(t) {
+	document.body.classList.toggle("tab-team", t === "team");
+	document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+}
+document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => setTab(b.dataset.t));
+// di HP, pilih nama di panel Tim -> gulir kembali ke game
+function toGame() {
+	if (window.matchMedia("(max-width: 760px)").matches) window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// layar penuh: CSS (jalan di semua HP termasuk iPhone) + Fullscreen API & kunci landscape bila didukung
+function setImmersive(on) {
+	document.body.classList.toggle("immersive", on);
+	const de = document.documentElement;
+	if (on) {
+		const req = de.requestFullscreen || de.webkitRequestFullscreen;
+		if (req) {
+			Promise.resolve(req.call(de)).then(() => {
+				if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {});
+			}).catch(() => {});
+		}
+	} else if (document.fullscreenElement || document.webkitFullscreenElement) {
+		(document.exitFullscreen || document.webkitExitFullscreen).call(document);
+	}
+	$("canvas").focus();
+}
+$("fs").onclick = () => setImmersive(!document.body.classList.contains("immersive"));
+document.addEventListener("fullscreenchange", () => {
+	if (!document.fullscreenElement) document.body.classList.remove("immersive");
+});
+
 // state dari Godot (dipanggil berkala)
 let lastFeedback = "";
 const rows = {};
@@ -352,7 +491,7 @@ window.ovUpdate = function (s) {
 			r.status = el("div", "status");
 			who.append(el("b", "", a.name), el("small", "", a.title), r.status);
 			r.append(sw, who);
-			r.onclick = () => send("focus", a.name);
+			r.onclick = () => { send("focus", a.name); toGame(); };
 			team.append(r);
 			rows[a.name] = r;
 		}
@@ -374,7 +513,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1872464,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1873728,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
