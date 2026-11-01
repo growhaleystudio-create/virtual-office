@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Growhaley · Virtual Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+	--ink: #19191c;
+	--panel: #232326;
+	--panel2: #2c2c31;
+	--line: #3a3a41;
+	--text: #f1f3f5;
+	--muted: #a3a8b3;
+	--blue: #177db5;
+	--blue-l: #9dc9e1;
+	--pink: #da457f;
+	--green: #4ade80;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+	background: radial-gradient(circle at 50% -20%, #1d4e6e 0%, var(--ink) 55%);
+	color: var(--text);
+	font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+	font-size: 14px;
+	overflow: hidden;
+}
+header {
+	height: 56px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 0 20px;
+	border-bottom: 1px solid var(--line);
+	background: rgba(25, 25, 28, 0.8);
+}
+header img { height: 22px; }
+header .brand { font-weight: 800; font-size: 18px; letter-spacing: -0.3px; }
+header .sub { color: var(--muted); font-weight: 600; }
+header .live { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+.layout {
+	height: calc(100% - 56px);
+	display: grid;
+	grid-template-columns: 290px minmax(0, 1fr) 290px;
+	gap: 16px;
+	padding: 16px;
+}
+aside { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+aside::-webkit-scrollbar { width: 6px; }
+aside::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.card h3 {
+	margin: 0 0 10px;
+	font-size: 12px;
+	letter-spacing: 1.5px;
+	text-transform: uppercase;
+	color: var(--blue-l);
+	display: flex;
+	justify-content: space-between;
+}
+.card h3 span { color: var(--muted); letter-spacing: 0; text-transform: none; }
+.row {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	padding: 8px;
+	border-radius: 8px;
+	cursor: pointer;
+	border: 1px solid transparent;
+}
+.row:hover { background: var(--panel2); }
+.row.sel { border-color: var(--blue); background: rgba(23, 125, 181, 0.15); }
+.swatch { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+.who { min-width: 0; flex: 1; }
+.who b { display: block; font-size: 14px; }
+.who small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { font-size: 11px; color: var(--blue-l); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.founder img { width: 40px; height: 52px; object-fit: cover; object-position: center 15%; border-radius: 6px; flex: none; background: #e9edf1; }
+.stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; gap: 10px; }
+.frame {
+	position: relative;
+	width: min(100%, calc((100vh - 140px) * 16 / 9));
+	aspect-ratio: 16 / 9;
+	border-radius: 14px;
+	overflow: hidden;
+	border: 1px solid var(--line);
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+	background: #9ecbef;
+}
+#canvas { display: block; width: 100%; height: 100%; }
+#canvas:focus { outline: none; }
+#status {
+	position: absolute;
+	inset: 0;
+	background: var(--panel);
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: 16px;
+	visibility: hidden;
+}
+#status img.logo { height: 48px; }
+#status-progress { width: 50%; display: none; accent-color: var(--blue); }
+#status-notice { display: none; color: #ffd0d0; padding: 1rem; text-align: center; }
+.feedback { min-height: 22px; color: var(--muted); font-size: 13px; text-align: center; }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; }
+button {
+	font: inherit;
+	font-weight: 700;
+	font-size: 13px;
+	color: var(--text);
+	background: var(--panel2);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 8px 10px;
+	cursor: pointer;
+	flex: 1;
+}
+button:hover { border-color: var(--blue-l); }
+button.on { background: var(--blue); border-color: var(--blue); }
+.cmd { display: flex; gap: 6px; }
+.cmd input {
+	flex: 1;
+	min-width: 0;
+	font: inherit;
+	color: var(--text);
+	background: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 8px 10px;
+}
+.cmd input:focus { outline: none; border-color: var(--blue); }
+.cmd button { flex: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+	font-size: 11px;
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: var(--panel2);
+	color: var(--muted);
+	cursor: pointer;
+	border: 1px solid var(--line);
+}
+.chip:hover { color: var(--text); }
+.keys { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; line-height: 1.9; }
+.keys kbd {
+	font-family: inherit;
+	font-size: 11px;
+	color: var(--text);
+	background: var(--panel2);
+	border: 1px solid var(--line);
+	border-bottom-width: 2px;
+	border-radius: 4px;
+	padding: 1px 6px;
+}
+.about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
+.log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
+@media (max-width: 1100px) {
+	body { overflow: auto; }
+	.layout { grid-template-columns: 1fr; height: auto; }
+	.stage { order: -1; }
+	.frame { width: 100%; }
+}
+</style>
+$GODOT_HEAD_INCLUDE
+</head>
+<body>
+<header>
+	<img src="static/logomark_white.png" alt="">
+	<div class="brand">Growhaley</div>
+	<div class="sub">Virtual Office</div>
+	<div class="live"><span class="dot"></span><span id="mode">Memuat kantor...</span></div>
+</header>
+
+<div class="layout">
+	<aside>
+		<div class="card">
+			<h3>Tim <span id="team-count"></span></h3>
+			<div id="team"></div>
+		</div>
+		<div class="card">
+			<h3>Founder <span>Lantai 3</span></h3>
+			<div id="founders"></div>
+		</div>
+	</aside>
+
+	<section class="stage">
+		<div class="frame">
+			<canvas id="canvas" width="1280" height="720">Browser kamu tidak mendukung canvas.</canvas>
+			<div id="status">
+				<img class="logo" src="static/logomark_white.png" alt="">
+				<progress id="status-progress"></progress>
+				<div id="status-notice"></div>
+			</div>
+		</div>
+		<div class="feedback" id="feedback">Klik karakter atau nama di panel Tim untuk melihat mereka.</div>
+	</section>
+
+	<aside>
+		<div class="card">
+			<h3>Lantai</h3>
+			<div class="btns" id="floors">
+				<button data-f="0">Lantai 1</button>
+				<button data-f="1">Lantai 2</button>
+				<button data-f="2">Founder</button>
+			</div>
+		</div>
+		<div class="card">
+			<h3>Tampilan</h3>
+			<div class="btns" id="modes">
+				<button data-m="0">Retro</button>
+				<button data-m="1">Sedang</button>
+				<button data-m="2">HD</button>
+			</div>
+		</div>
+		<div class="card">
+			<h3>Perintah</h3>
+			<form class="cmd" id="cmd-form">
+				<input id="cmd" placeholder="mis. Sales ke pantry" autocomplete="off">
+				<button type="submit">Kirim</button>
+			</form>
+			<div class="chips" id="chips">
+				<span class="chip">semua ke teras</span>
+				<span class="chip">Admin ke perpus</span>
+				<span class="chip">Sales lapor ke aku</span>
+				<span class="chip">semua kerja</span>
+			</div>
+		</div>
+		<div class="card">
+			<h3>Aktivitas</h3>
+			<div class="log" id="log"></div>
+		</div>
+		<div class="card">
+			<h3>Kontrol</h3>
+			<ul class="keys">
+				<li><kbd>Klik</kbd> pilih karakter / jalan ke titik</li>
+				<li><kbd>Tahan kiri</kbd> putar kamera</li>
+				<li><kbd>Tahan kanan</kbd> geser kamera</li>
+				<li><kbd>Scroll</kbd> zoom</li>
+				<li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> ganti lantai</li>
+				<li><kbd>Hover</kbd> berlian hijau: info</li>
+			</ul>
+		</div>
+		<div class="card about">
+			<h3>Tentang</h3>
+			<p>Kantor virtual tim Growhaley, digital growth partner. Untuk sementara karyawan berjalan sebagai NPC otomatis.</p>
+			<a href="https://growhaley.com" target="_blank" rel="noopener">growhaley.com →</a>
+		</div>
+	</aside>
+</div>
+
+<script>
+const FOUNDERS = [
+	["Alvin", "SEO & Growth Strategist", "alvin"],
+	["Dianita", "Social & Creative Strategist", "dianita"],
+	["Intan", "Lead UI/UX Designer", "intan"],
+	["Ahay", "Brand & Visual Designer", "ahay"],
+	["Angga", "Web Developer", "angga"],
+	["Luthfi", "AI Experience Designer", "luthfi"],
+];
+const $ = (id) => document.getElementById(id);
+function send(cmd, arg) {
+	if (window.ovCommand) {
+		window.ovCommand(cmd, String(arg ?? ""));
+	}
+}
+function el(tag, cls, text) {
+	const e = document.createElement(tag);
+	if (cls) e.className = cls;
+	if (text !== undefined) e.textContent = text;
+	return e;
+}
+
+// panel founder (statis)
+for (const [name, role, key] of FOUNDERS) {
+	const r = el("div", "row founder");
+	const img = el("img");
+	img.src = "static/team_" + key + ".png";
+	img.alt = name;
+	const who = el("div", "who");
+	who.append(el("b", "", name), el("small", "", role));
+	r.append(img, who);
+	r.onclick = () => send("room", name);
+	$("founders").append(r);
+}
+
+// tombol lantai & tampilan
+document.querySelectorAll("#floors button").forEach((b) => b.onclick = () => send("floor", b.dataset.f));
+document.querySelectorAll("#modes button").forEach((b) => b.onclick = () => send("pixel", b.dataset.m));
+$("cmd-form").onsubmit = (e) => {
+	e.preventDefault();
+	const t = $("cmd").value.trim();
+	if (t) send("run", t);
+	$("cmd").value = "";
+};
+document.querySelectorAll("#chips .chip").forEach((c) => c.onclick = () => send("run", c.textContent));
+
+// state dari Godot (dipanggil berkala)
+let lastFeedback = "";
+const rows = {};
+window.ovUpdate = function (s) {
+	$("mode").textContent = s.online;
+	$("team-count").textContent = s.agents.length + " orang";
+	// baris dibuat sekali lalu hanya teksnya yang diperbarui (supaya klik tidak hilang)
+	const team = $("team");
+	for (const a of s.agents) {
+		let r = rows[a.name];
+		if (!r) {
+			r = el("div", "row");
+			const sw = el("span", "swatch");
+			sw.style.background = "#" + a.color;
+			const who = el("div", "who");
+			r.status = el("div", "status");
+			who.append(el("b", "", a.name), el("small", "", a.title), r.status);
+			r.append(sw, who);
+			r.onclick = () => send("focus", a.name);
+			team.append(r);
+			rows[a.name] = r;
+		}
+		const txt = a.room + " · " + a.status;
+		if (r.status.textContent !== txt) r.status.textContent = txt;
+		r.classList.toggle("sel", a.name === s.selected);
+	}
+	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", Number(b.dataset.f) === s.floor));
+	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
+	if (s.feedback && s.feedback !== lastFeedback) {
+		lastFeedback = s.feedback;
+		$("feedback").textContent = s.feedback;
+		const line = el("div", "", "› " + s.feedback);
+		$("log").prepend(line);
+		while ($("log").childElementCount > 30) $("log").lastChild.remove();
+	}
+};
+</script>
+
+<script src="$GODOT_URL"></script>
+<script>
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) {
+			return;
+		}
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		statusNotice.textContent = err instanceof Error ? err.message : String(err);
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (missing.length !== 0) {
+		displayFailureNotice('Browser ini belum mendukung fitur yang dibutuhkan:\n' + missing.join('\n'));
+	} else {
+		setStatusMode('progress');
+		engine.startGame({
+			'onProgress': function (current, total) {
+				if (current > 0 && total > 0) {
+					statusProgress.value = current;
+					statusProgress.max = total;
+				} else {
+					statusProgress.removeAttribute('value');
+					statusProgress.removeAttribute('max');
+				}
+			},
+		}).then(() => {
+			setStatusMode('hidden');
+		}, displayFailureNotice);
+	}
+}());
+</script>
+</body>
+</html>

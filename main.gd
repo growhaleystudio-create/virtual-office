@@ -127,6 +127,7 @@ func _ready() -> void:
 	set_view_floor(0)
 	rng.randomize()
 	_apply_pixel_mode()
+	_setup_web_bridge()
 	_maybe_screenshot()
 
 
@@ -2161,6 +2162,65 @@ func _build_ui() -> void:
 	cmd_input.placeholder_text = "Ketik perintah lalu Enter...  (contoh: 'Sales lapor ke aku', 'semua ke teras', 'Admin ke perpus')"
 	cmd_input.text_submitted.connect(_on_submit)
 	vb.add_child(cmd_input)
+	if OS.has_feature("web"):
+		# versi web: panel tim, lantai, perintah & bantuan pindah ke halaman HTML di luar bingkai
+		help.visible = false
+		sp.visible = false
+		right.visible = false
+		vb.visible = false
+
+
+# ---------- jembatan ke halaman web (panel HTML di kiri-kanan bingkai) ----------
+
+var _js_cb: JavaScriptObject
+
+
+func _setup_web_bridge() -> void:
+	if not OS.has_feature("web"):
+		return
+	_js_cb = JavaScriptBridge.create_callback(_on_js_command)
+	var win := JavaScriptBridge.get_interface("window")
+	win.ovCommand = _js_cb
+	_push_web_state()
+
+
+func _on_js_command(args: Array) -> void:
+	var cmd := str(args[0]) if args.size() > 0 else ""
+	var arg := str(args[1]) if args.size() > 1 else ""
+	match cmd:
+		"focus":
+			var a := find_agent(arg)
+			if a:
+				focus_agent(a)
+		"floor":
+			follow = null
+			set_view_floor(int(arg))
+		"pixel":
+			_pix_i = clampi(int(arg), 0, PIXEL_LINES.size() - 1)
+			_apply_pixel_mode()
+		"room":
+			for wl in world_labels:
+				if str(wl["name"]).to_lower() == ("ruang " + arg).to_lower():
+					follow = null
+					set_view_floor(wl["floor"])
+					var p: Vector3 = wl["pos"]
+					t_pivot = Vector3(p.x, wl["floor"] * FH, p.z)
+					t_zoom = 13.0
+					show_feedback("Ruang %s · %s" % [arg, str(wl["sub"]).get_slice("
+", 1)])
+		"run":
+			feedback.text = run_command(arg)
+	_push_web_state()
+
+
+func _push_web_state() -> void:
+	var list := []
+	for a in agents:
+		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
+			"color": a.shirt_color.to_html(false)})
+	var st := {"agents": list, "floor": view_floor, "pixel": _pix_i, "feedback": feedback.text,
+		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
+	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
 
 func _on_submit(text: String) -> void:
@@ -2280,6 +2340,8 @@ func _process(d: float) -> void:
 	_status_timer -= d
 	if _status_timer <= 0.0:
 		_status_timer = 0.3
+		if OS.has_feature("web"):
+			_push_web_state()
 		for a in agents:
 			var b: Button = roster_buttons[a]
 			b.text = "    %s  ·  %s  ·  %s%s" % [a.agent_name, room_of(a), a.status, "  (nyata)" if a.showing_ext() else ""]
