@@ -33,6 +33,7 @@ var _face_yaw := 0.0
 var _phase := 0.0
 var _t := 0.0
 var _speed := 3.0
+var _manual := 0.0  # > 0 = sedang digerakkan keyboard (animasi jalan tanpa rute)
 
 var _rig: Node3D
 var _head: Node3D
@@ -388,6 +389,20 @@ func apply_net_state(s: Dictionary) -> void:
 	set_status(str(s.get("st", status)))
 
 
+## Dipanggil tiap frame saat pemain menggerakkan karakter dengan WASD (posisi diatur main).
+func step_manual(dir: Vector3) -> void:
+	if not _path.is_empty():
+		_path.clear()
+	if sitting:
+		stand_up()
+	if _manual <= 0.0:
+		set_status("berjalan...")
+	_manual = 0.12
+	_arrive_kind = "stand"  # pemain lain: jangan duduk saat tiba di posisi ini
+	_arrive_status = "diam"
+	_face_yaw = atan2(dir.x, dir.z)
+
+
 func stop() -> void:
 	_path.clear()
 	set_status("diam")
@@ -415,6 +430,7 @@ func _arrive() -> void:
 func _process(d: float) -> void:
 	_t += d
 	var moving := not _path.is_empty()
+	var walking := moving or _manual > 0.0
 	if moving:
 		var target: Vector3 = _path[0]
 		var to := target - position
@@ -430,6 +446,11 @@ func _process(d: float) -> void:
 			if flat.length() > 0.01:
 				_face_yaw = atan2(flat.x, flat.y)
 		_phase += d * _speed * 3.5
+	elif _manual > 0.0:
+		_manual -= d
+		_phase += d * _speed * 3.5
+		if _manual <= 0.0:
+			set_status("diam")
 	else:
 		think -= d
 		if think <= 0.0:
@@ -442,7 +463,7 @@ func _process(d: float) -> void:
 	var arm_l := 0.0
 	var arm_r := 0.0
 	var bob := 0.0
-	if moving:
+	if walking:
 		var s := sin(_phase) * 0.7
 		leg_l = s
 		leg_r = -s
@@ -466,7 +487,7 @@ func _process(d: float) -> void:
 	_arm_l.rotation.x = lerpf(_arm_l.rotation.x, arm_l, k)
 	_arm_r.rotation.x = lerpf(_arm_r.rotation.x, arm_r, k)
 	_rig.position.y = (SIT_DROP if sitting else 0.0) + bob
-	_head.rotation.z = sin(_phase * 0.5) * 0.06 if moving else 0.0
+	_head.rotation.z = sin(_phase * 0.5) * 0.06 if walking else 0.0
 	_update_poke(d)
 
 	if plumbob:

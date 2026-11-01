@@ -1432,7 +1432,7 @@ func set_founder(key: String) -> void:
 	me.think = 1e9
 	focus_agent(me)
 	_net_send()
-	show_feedback("Halo %s! Klik lantai untuk berjalan, klik karyawan untuk memberi perintah." % me.agent_name)
+	show_feedback("Halo %s! Jalan pakai WASD atau klik lantai, klik karyawan untuk memberi perintah." % me.agent_name)
 
 
 ## Ruang yang punya video meeting: [lantai, kotak sel (x, z, lebar, tinggi), nama].
@@ -2489,7 +2489,7 @@ func _build_ui() -> void:
 	cl.add_child(ui)
 
 	var help := Label.new()
-	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3: lantai  ·  0 / zoom out: tampak luar  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  L: kota ringan/penuh  ·  Enter: perintah"
+	help.text = "WASD: jalan (founder) / geser kamera  ·  Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3: lantai  ·  0 / zoom out: tampak luar  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  L: kota ringan/penuh  ·  Enter: perintah"
 	help.add_theme_font_size_override("font_size", 12)
 	help.position = Vector2(12, 6)
 	ui.add_child(help)
@@ -2766,6 +2766,13 @@ func _process(d: float) -> void:
 		if Input.is_key_pressed(KEY_E):
 			t_yaw -= 1.5 * d
 	_update_cursor(d)
+	if me and not exterior:
+		if v != Vector2.ZERO:
+			_me_walk(v, d)
+			v = Vector2.ZERO  # WASD menggerakkan karakter, bukan kamera
+		elif _walk_keys:
+			_walk_keys = false
+			_net_send()  # berhenti: kirim posisi akhir
 	if v != Vector2.ZERO:
 		follow = null
 		t_pivot += Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw) * t_zoom * 0.8 * d
@@ -2831,7 +2838,31 @@ func _maybe_screenshot() -> void:
 	pivot.position = t_pivot
 	if args.size() > 2:
 		for c in args[2].split(";", false):
-			if c.begins_with("chat "):
+			if c.begins_with("wait "):
+				await get_tree().create_timer(float(c.trim_prefix("wait "))).timeout
+			elif c.begins_with("press ") or c.begins_with("release "):
+				var ev := InputEventKey.new()
+				ev.keycode = OS.find_keycode_from_string(c.get_slice(" ", 1))
+				ev.physical_keycode = ev.keycode
+				ev.pressed = c.begins_with("press ")
+				Input.parse_input_event(ev)
+			elif c.begins_with("tp "):
+				var tp := c.split(" ")
+				me.position = Vector3(float(tp[1]), int(tp[3]) * FH, float(tp[2]))
+				me.stand_up()
+				follow = me
+			elif c.begins_with("gridat "):
+				var ga := c.split(" ")
+				var gf := int(ga[1])
+				for gz in range(int(ga[3]) - 3, int(ga[3]) + 4):
+					var row := ""
+					for gx in range(int(ga[2]) - 5, int(ga[2]) + 6):
+						var gc := Vector2i(gx, gz)
+						row += "?" if not grids[gf].is_in_boundsv(gc) else ("#" if grids[gf].is_point_solid(gc) else ("L" if gc in [LANDING[0], LANDING[1], Vector2i(STAIR_X1, STAIR2_Z), Vector2i(STAIR_X0 - 1, STAIR2_Z)] else "."))
+					print("z%02d %s" % [gz, row])
+			elif c.begins_with("where"):
+				print("me:", me.position if me else "-", " room:", room_of(me) if me else "-", " status:", me.status if me else "-")
+			elif c.begins_with("chat "):
 				show_bubble(me if me else agents[0], c.trim_prefix("chat "))
 			elif c.begins_with("founder "):
 				set_founder(c.trim_prefix("founder "))
@@ -2984,3 +3015,77 @@ func _update_bubbles() -> void:
 		pc.reset_size()
 		pc.position = Vector2(p.x - pc.size.x / 2.0, p.y - pc.size.y)
 		pc.modulate.a = clampf((b["until"] - now) / 0.6, 0.0, 1.0)
+
+
+# ---------- jalan dengan keyboard (WASD / panah) untuk karakter sendiri ----------
+
+const WALK_SPEED := 3.2
+const WALK_R := 0.22  # "badan" karakter: jarak minimal ke sel padat
+var _walk_keys := false
+var _walk_net := 0.0
+
+
+func _walk_grid(f: int) -> AStarGrid2D:
+	return _my_grid2 if f == 2 and _my_grid2 != null else grids[f]
+
+
+func _walkable(p: Vector3, f: int) -> bool:
+	var gr := _walk_grid(f)
+	for o in [Vector2(-WALK_R, -WALK_R), Vector2(WALK_R, -WALK_R), Vector2(-WALK_R, WALK_R), Vector2(WALK_R, WALK_R)]:
+		var q := Vector2(p.x + o.x + W / 2.0, p.z + o.y + H / 2.0)
+		var c := Vector2i(floori(q.x), floori(q.y))
+		if not gr.is_in_boundsv(c) or gr.is_point_solid(c):
+			return false
+	return true
+
+
+func _me_walk(v: Vector2, d: float) -> void:
+	var frac := fposmod(me.position.y, FH)
+	if frac > 0.05 and frac < FH - 0.05:
+		return  # sedang naik/turun tangga: biarkan selesai
+	var f := me.floor_index()
+	var dir := Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw)
+	var step := dir * WALK_SPEED * d
+	var stuck := not _walkable(me.position, f)  # mis. masih di kursi: boleh keluar
+	for cand in [step, Vector3(step.x, 0, 0), Vector3(0, 0, step.z)]:
+		var np: Vector3 = me.position + cand
+		if stuck or _walkable(np, f):
+			me.position = np
+			break
+	me.step_manual(dir)
+	follow = me
+	_walk_keys = true
+	if _try_stairs(dir, f):
+		return
+	_walk_net -= d
+	if _walk_net <= 0.0:
+		_walk_net = 0.4
+		_net_send()
+
+
+## Berjalan ke arah anak tangga di dekatnya -> naik/turun otomatis.
+func _try_stairs(dir: Vector3, f: int) -> bool:
+	for lo in [0, 1]:
+		var ln := _stair_link(lo)
+		var lo_e: Vector3 = ln["lo_end"]
+		var hi_e: Vector3 = ln["hi_end"]
+		var up_dir := Vector2(hi_e.x - lo_e.x, hi_e.z - lo_e.z).normalized()
+		var here: Vector3
+		var want: Vector2
+		var path: Array
+		if f == lo:
+			here = lo_e
+			want = up_dir
+			path = [lo_e, hi_e, cell_to_world(ln["hi_cell"], lo + 1)]
+		elif f == lo + 1:
+			here = hi_e
+			want = -up_dir
+			path = [hi_e, lo_e, cell_to_world(ln["lo_cell"], lo)]
+		else:
+			continue
+		# dekat ujung tangga DAN berjalan searah anak tangga (bukan sekadar lewat di koridor)
+		var dist := Vector2(here.x - me.position.x, here.z - me.position.z).length()
+		if dist < 1.1 and want.dot(Vector2(dir.x, dir.z)) > 0.6:
+			me.begin_move(path, "stand", me.rotation.y, "diam")
+			return true
+	return false
