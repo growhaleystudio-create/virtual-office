@@ -258,6 +258,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 .hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
+#sales-on { color: #3fbf6f; font-weight: 600; }
+#sales-on.off { color: var(--muted); font-weight: 400; }
+#sales-log:empty { display: none; }
+.chat-log .me { color: var(--muted); }
 .chat-log { max-height: 160px; margin-bottom: 8px; color: var(--text, inherit); }
 .chat-log b { color: var(--blue-l); font-weight: 600; }
 .chat-log .chat-empty { color: var(--muted); }
@@ -474,6 +478,15 @@ body.in-call #call { display: flex; }
 			</div>
 		</div>
 		<div class="card">
+			<h3>Sales Sawit <span id="sales-on" class="off">offline</span></h3>
+			<p class="meet-info" id="sales-info">Karyawan AI: bot Sales Sawit (cari lead, analisa, draft WA). Statusnya tampil di karakter Sales.</p>
+			<div class="log chat-log" id="sales-log"></div>
+			<form class="cmd" id="sales-form">
+				<input id="sales" maxlength="500" placeholder="Khusus pemilik bot" autocomplete="off" disabled>
+				<button type="submit" id="sales-go" disabled>Kirim</button>
+			</form>
+		</div>
+		<div class="card">
 			<h3>Chat Founder <span id="chat-info">realtime</span></h3>
 			<div class="log chat-log" id="chat-log"><div class="chat-empty">Belum ada obrolan. Pesan muncul sebagai balon di atas kepala.</div></div>
 			<form class="cmd" id="chat-form">
@@ -546,6 +559,8 @@ const FOUNDERS = [
 ];
 const $ = (id) => document.getElementById(id);
 // keadaan multiplayer (lihat bagian "multiplayer" di bawah)
+// keadaan karyawan AI Sales Sawit (lihat bagian "karyawan AI" di bawah)
+const sales = { online: false, allowed: [], pending: {}, status: "", stats: null };
 const net = { id: Math.random().toString(36).slice(2, 10), ch: null, ok: false, bc: null, seen: {}, online: [], godot: false, tracked: "" };
 function send(cmd, arg) {
 	if (window.ovCommand) {
@@ -650,6 +665,7 @@ function applyAccount() {
 	refreshMeet();
 	netTrack();
 	$("chat").disabled = $("chat-go").disabled = !isFounder();
+	salesRefresh();
 	$("chat").placeholder = isFounder() ? "Tulis pesan (balon di atas kepalamu)" : "Khusus founder, masuk dulu";
 }
 function openLogin() {
@@ -871,6 +887,75 @@ $("chat-form").onsubmit = (e) => {
 	chatShow(m);
 	$("chat").value = "";
 };
+// ---------- karyawan AI: Sales Sawit (bot Telegram di VPS) ----------
+// Bot menyambung ke channel yang sama. Pesan kita lewat /api/sales (dicek login + dienkripsi),
+// balasannya datang terenkripsi ("sales_rep") lalu dibuka lewat /api/sales {open}.
+function salesCan() { return isFounder() && sales.allowed.includes(session.key); }
+function salesRefresh() {
+	const on = $("sales-on");
+	on.textContent = sales.online ? (sales.status || "online") : "offline";
+	on.classList.toggle("off", !sales.online);
+	const can = salesCan() && sales.online;
+	$("sales").disabled = $("sales-go").disabled = !can;
+	$("sales").placeholder = !isFounder() ? "Khusus founder, masuk dulu"
+		: !salesCan() ? "Hanya pemilik bot yang bisa mengobrol"
+		: !sales.online ? "Bot sedang offline" : "Tanya / suruh Sales Sawit...";
+	const st = sales.stats ? Object.entries(sales.stats).map(([k, v]) => k + " " + v).join(" · ") : "";
+	$("sales-info").textContent = sales.online
+		? "Karyawan AI dari bot Sales Sawit." + (st ? " Pipeline: " + st : "")
+		: "Karyawan AI: bot Sales Sawit (cari lead, analisa, draft WA). Bot belum tersambung.";
+}
+function salesLog(who, text, cls) {
+	const line = el("div", cls || "");
+	line.append(el("b", "", who + ": "), document.createTextNode(text));
+	$("sales-log").append(line);
+	while ($("sales-log").childElementCount > 40) $("sales-log").firstChild.remove();
+	$("sales-log").scrollTop = $("sales-log").scrollHeight;
+}
+async function salesApi(body) {
+	const r = await fetch("/api/sales", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.token }, body: JSON.stringify(body) });
+	const d = await r.json().catch(() => ({}));
+	if (!r.ok) throw new Error(d.error || ("Gagal (" + r.status + ")"));
+	return d;
+}
+$("sales-form").onsubmit = async (e) => {
+	e.preventDefault();
+	const text = $("sales").value.trim();
+	if (!text || !salesCan()) return;
+	$("sales").value = "";
+	salesLog("Kamu", text, "me");
+	send("chat", JSON.stringify({ k: session.key, text }));
+	try {
+		const { id } = await salesApi({ text });
+		sales.pending[id] = setTimeout(() => {
+			delete sales.pending[id];
+			salesLog("Sales", "(tidak ada balasan, bot mungkin sibuk / offline)", "me");
+		}, 90000);
+	} catch (err) {
+		salesLog("Sales", "(gagal mengirim: " + err.message + ")", "me");
+	}
+};
+async function salesOnReply(p) {
+	if (!p || !sales.pending[p.id]) return;
+	clearTimeout(sales.pending[p.id]);
+	delete sales.pending[p.id];
+	try {
+		const d = await salesApi({ open: p.box });
+		const text = d.reply + (d.note ? " (" + d.note + ")" : "");
+		salesLog("Sales", text);
+		send("say", JSON.stringify({ name: "Sales", text: d.reply || d.note }));
+	} catch (err) {
+		salesLog("Sales", "(balasan tidak bisa dibuka: " + err.message + ")", "me");
+	}
+}
+function salesOnStatus(p) {
+	if (!p) return;
+	sales.online = true;
+	sales.status = p.text || "";
+	sales.stats = p.stats || null;
+	send("ext", JSON.stringify({ name: "Sales", text: p.busy ? p.text : "", ttl: 120 }));
+	salesRefresh();
+}
 window.ovNetSend = function (json) {
 	if (!isFounder()) return;
 	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "st", payload: { j: json } });
@@ -910,6 +995,8 @@ function loadScript(src) {
 async function netStart() {
 	let cfg = {};
 	try { cfg = await (await fetch("/api/net-config", { cache: "no-store" })).json(); } catch (e) {}
+	sales.allowed = cfg.sales || [];
+	salesRefresh();
 	if (cfg.url && cfg.key) {
 		try {
 			await loadScript(SUPABASE_JS);
@@ -918,10 +1005,21 @@ async function netStart() {
 			ch.on("broadcast", { event: "st" }, ({ payload }) => payload && payload.j && send("net_state", payload.j));
 			ch.on("broadcast", { event: "hello" }, () => send("net_sync"));
 			ch.on("broadcast", { event: "chat" }, ({ payload }) => chatShow(payload));
+			ch.on("broadcast", { event: "sales_status" }, ({ payload }) => salesOnStatus(payload));
+			ch.on("broadcast", { event: "sales_rep" }, ({ payload }) => salesOnReply(payload));
 			ch.on("presence", { event: "sync" }, () => {
 				const keys = [];
-				for (const metas of Object.values(ch.presenceState())) for (const m of metas) if (m.key) keys.push(m.key);
+				let bot = false;
+				for (const metas of Object.values(ch.presenceState())) for (const m of metas) {
+					if (m.key) keys.push(m.key);
+					if (m.bot === "sales") bot = true;
+				}
 				netSetOnline(keys);
+				if (bot !== sales.online) {
+					sales.online = bot;
+					if (!bot) send("ext", JSON.stringify({ name: "Sales", text: "", ttl: 0 }));
+					salesRefresh();
+				}
 			});
 			ch.subscribe((status) => {
 				net.ok = status === "SUBSCRIBED";
@@ -1034,7 +1132,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1891072,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1891248,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 

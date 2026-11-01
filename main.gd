@@ -41,7 +41,7 @@ const PLACE_STATUS := {
 const WANDER := ["pantry", "lounge", "meeting", "lobby", "server", "teras", "perpus", "pantry", "teras"]
 const WORK_TASKS := ["menulis laporan", "cek email", "follow up lead", "analisa data", "bekerja"]
 const AGENTS := [
-	["Sales", Color(0.86, 0.32, 0.26), Color(0.25, 0.15, 0.08), "Sales Executive"],
+	["Sales", Color(0.86, 0.32, 0.26), Color(0.25, 0.15, 0.08), "Sales Sawit (AI)"],
 	["Marketing", Color(0.25, 0.52, 0.86), Color(0.55, 0.30, 0.12), "Marketing Specialist"],
 	["Admin", Color(0.35, 0.70, 0.38), Color(0.12, 0.10, 0.10), "Staf Administrasi"],
 	["Support", Color(0.95, 0.72, 0.22), Color(0.70, 0.45, 0.20), "Customer Support"],
@@ -2642,6 +2642,15 @@ func _on_js_command(args: Array) -> void:
 		"net_sync":
 			_net_send()
 			return
+		"say":  # balon dari karyawan AI: {name, text}
+			var sm = JSON.parse_string(arg)
+			if sm is Dictionary and find_agent(str(sm.get("name", ""))):
+				show_bubble(find_agent(str(sm["name"])), str(sm.get("text", "")))
+			return
+		"ext":  # status nyata karyawan AI: {name, text, ttl}; text kosong = selesai
+			var em = JSON.parse_string(arg)
+			if em is Dictionary:
+				set_real_status(str(em.get("name", "")), str(em.get("text", "")), float(em.get("ttl", 120)))
 		"chat":
 			var m = JSON.parse_string(arg)
 			if m is Dictionary and founder_npcs.has(str(m.get("k", ""))):

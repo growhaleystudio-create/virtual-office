@@ -2,7 +2,7 @@
 module.exports = (req, res) => {
 	const env = process.env;
 	const info = (k) => (env[k] ? { set: true, length: env[k].trim().length } : { set: false });
-	const similar = Object.keys(env).filter((k) => /SESSION|DAILY|SECRET|SUPABASE/i.test(k));
+	const similar = Object.keys(env).filter((k) => /SESSION|DAILY|SECRET|SUPABASE|OFFICE|SALES/i.test(k));
 	res.setHeader("Content-Type", "application/json");
 	res.setHeader("Cache-Control", "no-store");
 	res.end(JSON.stringify({
@@ -11,6 +11,7 @@ module.exports = (req, res) => {
 		SUPABASE_URL: info("SUPABASE_URL"),
 		SUPABASE_ANON_KEY: info("SUPABASE_ANON_KEY"),
 		SUPABASE_PUBLISHABLE_KEY: info("SUPABASE_PUBLISHABLE_KEY"),
+		OFFICE_LINK_SECRET: info("OFFICE_LINK_SECRET"),
 		similar_names: similar,
 		vercel_env: env.VERCEL_ENV || null,
 		commit: (env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || null,

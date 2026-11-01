@@ -6,5 +6,7 @@ module.exports = (req, res) => {
 	const key = (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
 	res.setHeader("Content-Type", "application/json");
 	res.setHeader("Cache-Control", "no-store");
-	res.end(JSON.stringify(url && key ? { url, key } : {}));
+	// founder yang boleh ngobrol dengan Sales Sawit (karyawan AI), lihat api/sales.js
+	const sales = (process.env.SALES_FOUNDERS || "luthfi").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	res.end(JSON.stringify(url && key ? { url, key, sales } : { sales }));
 };
