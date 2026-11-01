@@ -264,6 +264,33 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 #sales-on.off { color: var(--muted); font-weight: 400; }
 #sales-log:empty { display: none; }
 .chat-log .me { color: var(--muted); }
+.about-list { margin: 6px 0 8px; padding-left: 18px; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.about-list li { margin-bottom: 4px; }
+.about-list b { color: var(--text); }
+/* tombol panah di layar (HP / layar sentuh) untuk menggerakkan karakter sendiri */
+#dpad { display: none; position: absolute; left: 12px; bottom: 12px; width: 132px; height: 132px; z-index: 5;
+	touch-action: none; user-select: none; -webkit-user-select: none; }
+#dpad button { position: absolute; width: 44px; height: 44px; padding: 0; border-radius: 12px;
+	background: rgba(20, 22, 26, 0.55); border: 1px solid rgba(255, 255, 255, 0.35); color: #fff;
+	font-size: 18px; line-height: 1; touch-action: none; -webkit-tap-highlight-color: transparent; }
+#dpad button.on { background: rgba(23, 125, 181, 0.85); border-color: #9DC9E1; }
+#dpad [data-d="u"] { left: 44px; top: 0; }
+#dpad [data-d="d"] { left: 44px; bottom: 0; }
+#dpad [data-d="l"] { left: 0; top: 44px; }
+#dpad [data-d="r"] { right: 0; top: 44px; }
+@media (hover: none) and (pointer: coarse) {
+	body.is-founder #dpad, body.is-guest #dpad { display: block; }
+}
+@media (max-width: 760px) {
+	#dpad { left: 8px; bottom: 8px; width: 90px; height: 90px; }
+	#dpad button { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
+	#dpad [data-d="u"], #dpad [data-d="d"] { left: 30px; }
+	#dpad [data-d="l"], #dpad [data-d="r"] { top: 30px; }
+}
+body.immersive #dpad { left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); width: 132px; height: 132px; }
+body.immersive #dpad button { width: 44px; height: 44px; border-radius: 12px; font-size: 18px; }
+body.immersive #dpad [data-d="u"], body.immersive #dpad [data-d="d"] { left: 44px; }
+body.immersive #dpad [data-d="l"], body.immersive #dpad [data-d="r"] { top: 44px; }
 .chat-log { max-height: 160px; margin-bottom: 8px; color: var(--text, inherit); }
 .chat-log b { color: var(--blue-l); font-weight: 600; }
 .chat-log .chat-empty { color: var(--muted); }
@@ -445,6 +472,12 @@ $GODOT_HEAD_INCLUDE
 	<section class="stage">
 		<div class="frame">
 			<canvas id="canvas" width="1280" height="720">Browser kamu tidak mendukung canvas.</canvas>
+			<div id="dpad" aria-label="Gerakkan karakter">
+				<button type="button" data-d="u" aria-label="Atas">▲</button>
+				<button type="button" data-d="l" aria-label="Kiri">◀</button>
+				<button type="button" data-d="r" aria-label="Kanan">▶</button>
+				<button type="button" data-d="d" aria-label="Bawah">▼</button>
+			</div>
 			<div id="status">
 				<img class="logo" src="static/logomark_white.png" alt="">
 				<progress id="status-progress"></progress>
@@ -552,7 +585,13 @@ $GODOT_HEAD_INCLUDE
 		</div>
 		<div class="card about">
 			<h3>Tentang</h3>
-			<p>Kantor virtual tim Growhaley, digital growth partner. Untuk sementara karyawan berjalan sebagai NPC otomatis.</p>
+			<p>Kantor virtual tim Growhaley, digital growth partner.</p>
+			<ul class="about-list">
+				<li><b>Sales</b> adalah karyawan AI yang terhubung ke bot Sales Sawit (cari lead, analisa, draft WA). Statusnya nyata.</li>
+				<li>Karyawan lain (Marketing, Admin, Support, Finance, Developer) <b>untuk sementara masih NPC</b> yang bergerak otomatis. Nanti menyusul jadi AI.</li>
+				<li><b>Founder</b> masuk dengan akun, bisa ke semua lantai, memberi perintah, chat &amp; video meeting.</li>
+				<li><b>Tamu</b> bisa punya karakter (Masuk Tamu) dan menjelajah Lantai 1.</li>
+			</ul>
 			<a href="https://growhaley.com" target="_blank" rel="noopener">growhaley.com →</a>
 		</div>
 	</aside>
@@ -697,6 +736,7 @@ function applyAccount() {
 	$("cmd").placeholder = isFounder() ? "mis. Sales ke pantry · aku ke ruanganku" : "Khusus founder, masuk dulu";
 	document.querySelectorAll("#chips .chip").forEach((c) => c.style.opacity = isFounder() ? "" : "0.45");
 	document.querySelector('#floors button[data-f="2"]').classList.toggle("locked", !isFounder());
+	document.querySelector('#floors button[data-f="1"]').classList.toggle("locked", !isFounder());
 	refreshMeet();
 	netTrack();
 	$("chat").disabled = $("chat-go").disabled = !isFounder();
@@ -1173,6 +1213,30 @@ function renderGuests(list) {
 		if (r.st.textContent !== g.room) r.st.textContent = g.room;
 	});
 }
+
+// tombol panah di layar: tekan = jalan, lepas = berhenti (bisa dua arah sekaligus = serong)
+(function () {
+	const held = {};
+	const vec = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
+	let last = "0,0";
+	function push() {
+		let x = 0, y = 0;
+		for (const k in held) if (held[k]) { x += vec[k][0]; y += vec[k][1]; }
+		const v = x + "," + y;
+		if (v !== last) { last = v; send("move", v); }
+	}
+	document.querySelectorAll("#dpad button").forEach((b) => {
+		const k = b.dataset.d;
+		const down = (e) => { e.preventDefault(); held[k] = true; b.classList.add("on"); if (b.setPointerCapture && e.pointerId !== undefined) try { b.setPointerCapture(e.pointerId); } catch (x) {} push(); };
+		const up = (e) => { e.preventDefault(); held[k] = false; b.classList.remove("on"); push(); };
+		b.addEventListener("pointerdown", down);
+		b.addEventListener("pointerup", up);
+		b.addEventListener("pointercancel", up);
+		b.addEventListener("lostpointercapture", up);
+		b.addEventListener("contextmenu", (e) => e.preventDefault());
+	});
+	addEventListener("blur", () => { for (const k in held) held[k] = false; document.querySelectorAll("#dpad button").forEach((b) => b.classList.remove("on")); push(); });
+})();
 
 // state dari Godot (dipanggil berkala)
 let lastFeedback = "";

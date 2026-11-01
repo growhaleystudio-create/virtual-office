@@ -1486,8 +1486,8 @@ func _set_exterior(on: bool) -> void:
 
 ## Pindah lantai atas permintaan pemakai (tombol / tombol angka): keluar dari tampak luar dulu.
 func go_floor(f: int) -> void:
-	if web_guest and f >= 2:
-		show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
+	if web_guest and f >= 1:
+		show_feedback("Lantai 2 & 3 khusus founder. Tamu hanya bisa di Lantai 1.")
 		return
 	follow = null
 	if exterior:
@@ -2006,7 +2006,7 @@ func show_feedback(text: String) -> void:
 func _build_bridge() -> void:
 	if OS.has_feature("web"):
 		# versi web (online): karakter jalan sebagai NPC otomatis, tanpa relay AI di laptop
-		bridge_label.text = "Mode online · karyawan NPC"
+		bridge_label.text = "Online · Sales = AI, lainnya NPC"
 		return
 	bridge = Bridge.new()
 	bridge.main = self
@@ -2064,9 +2064,9 @@ func run_command(text: String) -> String:
 # ---------- kamera & input ----------
 
 func set_view_floor(f: int) -> void:
-	if web_guest and f >= 2:
-		show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
-		f = mini(view_floor, 1)
+	if web_guest and f >= 1:
+		show_feedback("Lantai 2 & 3 khusus founder. Tamu hanya bisa di Lantai 1.")
+		f = 0
 	view_floor = clampi(f, 0, NFLOORS - 1)
 	floors[1].visible = exterior or view_floor >= 1
 	floors[2].visible = exterior or view_floor >= 2
@@ -2603,7 +2603,9 @@ func _on_js_command(args: Array) -> void:
 	match cmd:
 		"focus":
 			var a := find_agent(arg)
-			if a:
+			if a and web_guest and a.floor_index() >= 1:
+				show_feedback("%s sedang di lantai %d (khusus founder)" % [a.agent_name, a.floor_index() + 1])
+			elif a:
 				focus_agent(a)
 		"floor":
 			go_floor(int(arg))
@@ -2626,7 +2628,7 @@ func _on_js_command(args: Array) -> void:
 			_apply_pixel_mode()
 		"room":
 			if web_guest:
-				show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
+				show_feedback("Lantai 2 & 3 khusus founder. Tamu hanya bisa di Lantai 1.")
 				_push_web_state()
 				return
 			for wl in world_labels:
@@ -2643,8 +2645,8 @@ func _on_js_command(args: Array) -> void:
 		"focus_founder":
 			var fa: Agent = founder_npcs.get(arg)
 			if fa:
-				if web_guest and fa.floor_index() >= 2:
-					show_feedback("%s sedang di lantai 3 (khusus founder)" % fa.agent_name)
+				if web_guest and fa.floor_index() >= 1:
+					show_feedback("%s sedang di lantai %d (khusus founder)" % [fa.agent_name, fa.floor_index() + 1])
 				else:
 					focus_agent(fa)
 		"net_state":
@@ -2654,6 +2656,12 @@ func _on_js_command(args: Array) -> void:
 			_net_set_online(arg)
 		"net_sync":
 			_net_send()
+			return
+		"move":  # tombol panah di layar: "x,y" (-1..1), "0,0" = lepas
+			var mv := arg.split(",")
+			_pad = Vector2(float(mv[0]), float(mv[1])).limit_length(1.0) if mv.size() == 2 else Vector2.ZERO
+			if _pad != Vector2.ZERO and exterior:
+				go_floor(me.floor_index() if me else 0)
 			return
 		"say":  # balon dari karyawan AI: {name, text}
 			var sm = JSON.parse_string(arg)
@@ -2783,6 +2791,8 @@ func _process(d: float) -> void:
 			t_yaw += 1.5 * d
 		if Input.is_key_pressed(KEY_E):
 			t_yaw -= 1.5 * d
+	if _pad != Vector2.ZERO and me:
+		v = (v + _pad).limit_length(1.0)
 	_update_cursor(d)
 	if me and not exterior:
 		if v != Vector2.ZERO:
@@ -2796,6 +2806,8 @@ func _process(d: float) -> void:
 		t_pivot += Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw) * t_zoom * 0.8 * d
 	_update_camera(d)
 
+	if follow and web_guest and follow.floor_index() >= 1:
+		follow = null  # tamu: kamera tidak ikut naik ke lantai founder
 	if follow:
 		if follow.floor_index() != view_floor:
 			set_view_floor(follow.floor_index())
@@ -3042,7 +3054,7 @@ func show_bubble(a: Agent, text: String) -> void:
 	vb.add_child(l)
 	_fx_root.add_child(pc)
 	_bubbles.append({"agent": a, "panel": pc, "until": Time.get_ticks_msec() / 1000.0 + BUBBLE_TIME})
-	if a != me and (not web_guest or a.floor_index() < 2):
+	if a != me and (not web_guest or a.floor_index() < 1):
 		show_feedback("%s: %s" % [a.agent_name, text])
 
 
@@ -3056,7 +3068,7 @@ func _update_bubbles() -> void:
 			_bubbles.erase(b)
 			continue
 		var head := a.global_position + Vector3(0, 2.9, 0)
-		var show := a.visible and not exterior and not (web_guest and a.floor_index() >= 2) and not cam.is_position_behind(head)
+		var show := a.visible and not exterior and not (web_guest and a.floor_index() >= 1) and not cam.is_position_behind(head)
 		pc.visible = show
 		if not show:
 			continue
@@ -3071,6 +3083,7 @@ func _update_bubbles() -> void:
 const WALK_SPEED := 3.2
 const WALK_R := 0.22  # "badan" karakter: jarak minimal ke sel padat
 var _walk_keys := false
+var _pad := Vector2.ZERO  # tombol panah di layar HP (dari halaman web, cmd "move")
 var _walk_net := 0.0
 
 
@@ -3119,7 +3132,7 @@ func _me_walk(v: Vector2, d: float) -> void:
 
 ## Berjalan ke arah anak tangga di dekatnya -> naik/turun otomatis.
 func _try_stairs(dir: Vector3, f: int) -> bool:
-	for lo in ([0] if me_is_guest else [0, 1]):
+	for lo in ([] if me_is_guest else [0, 1]):  # tamu: hanya lantai 1
 		var ln := _stair_link(lo)
 		var lo_e: Vector3 = ln["lo_end"]
 		var hi_e: Vector3 = ln["hi_end"]
@@ -3205,7 +3218,7 @@ func set_guest(json: String) -> void:
 	if view_floor >= 2:
 		set_view_floor(0)
 	focus_agent(me)
-	show_feedback("Halo %s! Jalan pakai WASD atau klik lantai. Lantai 3 khusus founder." % name_)
+	show_feedback("Halo %s! Jalan pakai WASD / tombol panah atau klik lantai. Tamu bisa menjelajah Lantai 1." % name_)
 	_net_send()
 
 
