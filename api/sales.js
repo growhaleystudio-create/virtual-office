@@ -1,7 +1,7 @@
 // Ngobrol dengan karyawan AI "Sales" = bot Sales Sawit di VPS.
 // POST {text}        (Bearer token founder) -> {id}   kirim permintaan terenkripsi ke bot
 // POST {open: box}   (Bearer token founder) -> {reply, note}   buka balasan terenkripsi milik founder ini
-// Hanya founder di env SALES_FOUNDERS (dipisah koma, default "luthfi") yang boleh.
+// Hanya founder di env SALES_FOUNDERS (dipisah koma, default "angga") yang boleh.
 const crypto = require("crypto");
 const { verify, bearer, readJson, send } = require("./_lib.js");
 const { seal, open } = require("./_link.js");
@@ -9,7 +9,7 @@ const { seal, open } = require("./_link.js");
 const TOPIC = "growhaley-office";
 
 function allowedFounders() {
-	return (process.env.SALES_FOUNDERS || "luthfi").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	return (process.env.SALES_FOUNDERS || "angga").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
 async function broadcast(event, payload) {

@@ -7,6 +7,6 @@ module.exports = (req, res) => {
 	res.setHeader("Content-Type", "application/json");
 	res.setHeader("Cache-Control", "no-store");
 	// founder yang boleh ngobrol dengan Sales Sawit (karyawan AI), lihat api/sales.js
-	const sales = (process.env.SALES_FOUNDERS || "luthfi").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	const sales = (process.env.SALES_FOUNDERS || "angga").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 	res.end(JSON.stringify(url && key ? { url, key, sales } : { sales }));
 };
