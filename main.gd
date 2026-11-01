@@ -113,6 +113,13 @@ var town  # lingkungan kota (town.gd)
 var roster_rows: VBoxContainer
 var _status_timer := 0.0
 var bridge: Bridge
+## Akses founder (versi web). Tamu hanya melihat: tidak bisa memberi perintah, tidak bisa
+## melihat lantai 3. Founder yang login mendapat karakternya sendiri (`me`).
+var web_guest := OS.has_feature("web")
+var me: Agent = null
+var founder_npcs := {}  # key -> Agent (duduk di ruangnya masing-masing)
+var founder_seats := {}  # key -> {cell, yaw, rect, name}
+var _my_grid2: AStarGrid2D  # grid lantai 3 khusus `me`: ruang founder lain tertutup
 ## Detail lingkungan. Penuh = kota (NPC, kendaraan, gedung tetangga) + bayangan.
 ## Ringan = hanya kantor & halaman, tanpa bayangan (untuk HP / laptop lemah).
 ## Web mulai Ringan (kota baru dibangun saat pemain memilih Penuh); desktop mulai Penuh.
@@ -1356,6 +1363,65 @@ func set_detail(on: bool) -> void:
 	show_feedback("Detail penuh: kota, NPC & kendaraan aktif" if on else "Mode ringan: hanya kantor, tanpa kota & NPC luar")
 
 
+## Nama ruang founder lain yang memuat sel ini (terkunci untuk `me`), atau "".
+func _locked_room_at(c: Vector2i) -> String:
+	for key in founder_seats:
+		if me and founder_npcs.get(key) == me:
+			continue
+		var r: Rect2i = founder_seats[key]["rect"]
+		if r.has_point(c):
+			return founder_seats[key]["name"]
+	return ""
+
+
+func _me_command(t: String) -> String:
+	if t.contains("ruang") and not t.contains("meeting") and not t.contains("rapat"):
+		for key in founder_seats:
+			if founder_npcs[key] == me:
+				var seat: Dictionary = founder_seats[key]
+				var spot := {"cell": seat["cell"], "floor": 2, "kind": "sit", "yaw": seat["yaw"], "approach": NONE, "shift": 0.2}
+				return "Jalan ke ruanganmu" if send(me, spot, "di ruangan") else "Tidak ada jalan ke ruanganmu."
+	for entry in PLACE_WORDS:
+		for w in entry[1]:
+			if t.contains(w):
+				return ("Kamu -> %s" % entry[0]) if go_place(me, entry[0]) else "Tidak ada jalan ke sana."
+	return "Tujuan tidak dikenal. Coba: aku ke pantry / aku ke ruanganku."
+
+
+## Login / logout founder (dipanggil dari halaman web). key "" = keluar jadi tamu.
+func set_founder(key: String) -> void:
+	if me:
+		me.set_selected(false)
+		if me.plumbob:
+			me.plumbob.queue_free()
+			me.plumbob = null
+	me = founder_npcs.get(key)
+	web_guest = me == null and OS.has_feature("web")
+	_my_grid2 = null
+	if me == null:
+		follow = null
+		select(agents[0])
+		if view_floor >= 2:
+			set_view_floor(1)
+		show_feedback("Keluar. Sekarang mode tamu (hanya melihat).")
+		return
+	# grid lantai 3 khusus: ruang founder lain ditutup
+	_my_grid2 = AStarGrid2D.new()
+	_my_grid2.region = grids[2].region
+	_my_grid2.cell_size = Vector2.ONE
+	_my_grid2.diagonal_mode = grids[2].diagonal_mode
+	_my_grid2.update()
+	for x in W:
+		for z in H:
+			var c := Vector2i(x, z)
+			_my_grid2.set_point_solid(c, grids[2].is_point_solid(c) or _locked_room_at(c) != "")
+	me.plumbob = Agent.make_plumbob(me, 0.42, Color(1.0, 0.82, 0.25))
+	me.plumbob.position.y = 2.35
+	me.think = 1e9
+	focus_agent(me)
+	show_feedback("Halo %s! Klik lantai untuk berjalan, klik karyawan untuk memberi perintah." % me.agent_name)
+
+
 ## Ruang yang punya video meeting: [lantai, kotak sel (x, z, lebar, tinggi), nama].
 const MEET_ROOMS := [[0, Rect2(36, 0, 8, 9), "Ruang Meeting"], [1, Rect2(38, 0, 6, 13), "Rapat Kecil"]]
 
@@ -1398,6 +1464,9 @@ func _set_exterior(on: bool) -> void:
 
 ## Pindah lantai atas permintaan pemakai (tombol / tombol angka): keluar dari tampak luar dulu.
 func go_floor(f: int) -> void:
+	if web_guest and f >= 2:
+		show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
+		return
 	follow = null
 	if exterior:
 		t_zoom = 34.0
@@ -1442,6 +1511,7 @@ func _build_floor2() -> void:
 		_box(Vector3(c.x, -0.1, c.z), Vector3(r[2], 0.2, r[3]), slab, "stone", 0.5)
 	# area tak terpakai (teras di bawah) ditandai solid supaya tidak bisa dipilih
 	_solid(0, D, W, H - D)
+	_solid(STAIR_X0, STAIR2_Z, STAIR_X1 - STAIR_X0, 2)  # lubang tangga
 	_floor_finish(0, 8, 28, 2, Color(0.90, 0.91, 0.92), "tiles", 0.5)
 	_floor_finish(34, 0, 2, D, Color(0.90, 0.91, 0.92), "tiles", 0.5)
 	_floor_finish(29, 0, 5, STAIR2_Z, Color(0.90, 0.91, 0.92), "tiles", 0.5)
@@ -1550,6 +1620,7 @@ func _founder_room(info: Array, r: Rect2i, door: Vector2i) -> void:
 	bn.add_child(nm)
 	# kursi founder
 	_chair(cell.call(1, 0), yaw_, BRAND_INK)
+	founder_seats[key] = {"cell": cell.call(1, 0), "yaw": yaw_, "rect": r, "name": fname}
 	# meja eksekutif
 	var dc: Vector2i = cell.call(2, 0)
 	for v in range(-1, 2):
@@ -1727,6 +1798,23 @@ func _build_agents() -> void:
 		add_child(a)
 		agents.append(a)
 	select(agents[0])
+	# founder duduk di ruangnya (lantai 3); yang login mendapat kendali atas karakternya
+	var hairs := [Color(0.12, 0.09, 0.07), Color(0.20, 0.12, 0.08), Color(0.10, 0.08, 0.08)]
+	var i := 0
+	for info in FOUNDERS:
+		var seat: Dictionary = founder_seats[info[2]]
+		var fa := Agent.new()
+		fa.setup(info[0], info[3], hairs[i % hairs.size()])
+		fa.title = info[1]
+		var y_: float = seat["yaw"]
+		fa.position = cell_to_world(seat["cell"], 2) + Vector3(sin(y_), 0, cos(y_)) * 0.2
+		fa.dest_cell = seat["cell"]
+		fa.dest_floor = 2
+		fa.think = 1e9
+		add_child(fa)
+		fa.begin_move([fa.position], "sit", y_, "di ruangan")
+		founder_npcs[info[2]] = fa
+		i += 1
 	# berlian hijau melayang di atas tiap ruangan (nama muncul saat di-hover)
 	for wl in world_labels:
 		var small: bool = wl["small"]
@@ -1738,6 +1826,17 @@ func _build_agents() -> void:
 
 # ---------- gerak & perintah ----------
 
+## Sambungan tangga: lantai bawah `lo` ke `lo + 1`. Sel pijakan di bawah & atas, plus ujung anak tangga.
+func _stair_link(lo: int) -> Dictionary:
+	if lo == 0:
+		var zc := STAIR_Z + 0.5 - H / 2.0
+		return {"lo_cell": LANDING[0], "hi_cell": LANDING[1],
+			"lo_end": Vector3(STAIR_X0 - W / 2.0, 0, zc), "hi_end": Vector3(STAIR_X1 - W / 2.0, FH, zc)}
+	var zc2 := STAIR2_Z + 0.5 - H / 2.0
+	return {"lo_cell": Vector2i(STAIR_X1, STAIR2_Z), "hi_cell": Vector2i(STAIR_X0 - 1, STAIR2_Z),
+		"lo_end": Vector3(STAIR_X1 - W / 2.0, FH, zc2), "hi_end": Vector3(STAIR_X0 - W / 2.0, 2.0 * FH, zc2)}
+
+
 func _stair_end(f: int) -> Vector3:
 	var zc := STAIR_Z + 0.5 - H / 2.0
 	if f == 0:
@@ -1745,9 +1844,10 @@ func _stair_end(f: int) -> Vector3:
 	return Vector3(STAIR_X1 - W / 2.0, FH, zc)
 
 
-func _grid_path(f: int, from: Vector2i, to: Vector2i) -> Array:
+func _grid_path(f: int, from: Vector2i, to: Vector2i, a: Agent = null) -> Array:
 	var pts := []
-	for c in grids[f].get_id_path(from, to):
+	var gr: AStarGrid2D = _my_grid2 if a != null and a == me and f == 2 and _my_grid2 != null else grids[f]
+	for c in gr.get_id_path(from, to):
 		pts.append(cell_to_world(c, f))
 	return pts
 
@@ -1759,26 +1859,34 @@ func send(a: Agent, spot: Dictionary, arrive_status: String) -> bool:
 	var sf := a.floor_index()
 	var pts := []
 	var start: Vector2i
-	if a.position.y > 0.05 and a.position.y < FH - 0.05:
+	var frac := fposmod(a.position.y, FH)
+	if frac > 0.05 and frac < FH - 0.05:
 		# sedang di tangga: selesaikan dulu ke ujung terdekat
-		pts.append(_stair_end(sf))
-		start = LANDING[sf]
+		var ln := _stair_link(int(a.position.y / FH))
+		var up := frac > FH / 2.0
+		pts.append(ln["hi_end"] if up else ln["lo_end"])
+		start = ln["hi_cell"] if up else ln["lo_cell"]
+		sf = int(a.position.y / FH) + (1 if up else 0)
 	else:
 		start = nearest_free(world_to_cell(a.position), sf)
-	if sf == tf:
-		var p := _grid_path(sf, start, target)
-		if p.is_empty():
-			return false
-		pts.append_array(p)
-	else:
-		var p1 := _grid_path(sf, start, LANDING[sf])
-		var p2 := _grid_path(tf, LANDING[tf], target)
-		if p1.is_empty() or p2.is_empty():
+	# lewati tangga lantai demi lantai sampai lantai tujuan
+	var f := sf
+	while f != tf:
+		var up2 := tf > f
+		var ln2 := _stair_link(f if up2 else f - 1)
+		var exit_cell: Vector2i = ln2["lo_cell"] if up2 else ln2["hi_cell"]
+		var p1 := _grid_path(f, start, exit_cell, a)
+		if p1.is_empty():
 			return false
 		pts.append_array(p1)
-		pts.append(_stair_end(sf))
-		pts.append(_stair_end(tf))
-		pts.append_array(p2)
+		pts.append(ln2["lo_end"] if up2 else ln2["hi_end"])
+		pts.append(ln2["hi_end"] if up2 else ln2["lo_end"])
+		f += 1 if up2 else -1
+		start = ln2["hi_cell"] if up2 else ln2["lo_cell"]
+	var pf := _grid_path(tf, start, target, a)
+	if pf.is_empty():
+		return false
+	pts.append_array(pf)
 	var yaw_: float = spot["yaw"]
 	if spot["kind"] == "sit":
 		var p := cell_to_world(spot["cell"], tf) + Vector3(sin(yaw_), 0, cos(yaw_)) * float(spot["shift"])
@@ -1888,6 +1996,11 @@ func run_command(text: String) -> String:
 	var t := text.to_lower().strip_edges()
 	if t.is_empty():
 		return ""
+	if web_guest:
+		return "Hanya founder yang bisa memberi perintah. Masuk dulu lewat tombol Masuk Founder."
+	# perintah untuk diri sendiri: "aku ke pantry", "saya ke ruanganku"
+	if me and (t.begins_with("aku ") or t.begins_with("saya ")):
+		return _me_command(t)
 	var targets := []
 	if t.contains("semua") or t.contains("all"):
 		targets = agents.duplicate()
@@ -1928,6 +2041,9 @@ func run_command(text: String) -> String:
 # ---------- kamera & input ----------
 
 func set_view_floor(f: int) -> void:
+	if web_guest and f >= 2:
+		show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
+		f = mini(view_floor, 1)
 	view_floor = clampi(f, 0, NFLOORS - 1)
 	floors[1].visible = exterior or view_floor >= 1
 	floors[2].visible = exterior or view_floor >= 2
@@ -2068,7 +2184,10 @@ func _pick_agent(pos: Vector2) -> Agent:
 		return null  # tampak luar: karakter di dalam tertutup atap
 	var best: Agent = null
 	var best_d := 0.9
-	for a in agents:
+	var pool: Array = agents.duplicate()
+	if me:
+		pool.append(me)
+	for a: Agent in pool:
 		if not a.visible:
 			continue
 		var p := a.global_position + Vector3(0, 0.8, 0)
@@ -2158,7 +2277,7 @@ func _update_cursor(d: float) -> void:
 	var mouse := get_viewport().get_mouse_position()
 	var over_ui := get_viewport().gui_get_hovered_control() != null
 	_hover_agent = null if over_ui else _pick_agent(mouse)
-	var show := _crack_t > 0.0 or _hover_agent != null
+	var show := _crack_t > 0.0 or (_hover_agent != null and _hover_agent != me)
 	var want := "whip" if show else ""
 	if want != _cursor_state:
 		_cursor_state = want
@@ -2242,7 +2361,10 @@ func _click(pos: Vector2) -> void:
 	var best := _pick_agent(pos)
 	if best:
 		select(best)
-		whip(best)
+		if best == me:
+			show_feedback("Kamu (%s). Klik lantai untuk berjalan." % me.agent_name)
+		else:
+			whip(best)
 		return
 	var rm = _pick_room(pos)
 	if rm != null and not rm["small"]:
@@ -2250,13 +2372,22 @@ func _click(pos: Vector2) -> void:
 		var sub: String = rm["sub"]
 		show_feedback("%s · Lantai %d%s" % [rm["name"], rm["floor"] + 1, ("  ·  " + sub.get_slice("\n", 0)) if sub != "" else ""])
 		return
-	if view_floor == 2:
-		show_feedback("Lantai 3 khusus ruang founder (hanya untuk dilihat)")
+	if web_guest:
+		show_feedback("Mode tamu: hanya melihat. Founder bisa Masuk untuk menggerakkan karakter.")
+		return
+	if view_floor == 2 and selected != me:
+		show_feedback("Karyawan tidak naik ke lantai 3 (khusus founder)")
 		return
 	var gp = _ground_point(pos)
 	if gp == null or selected == null:
 		return
-	var c := nearest_free(world_to_cell(gp), view_floor)
+	var raw := world_to_cell(gp)
+	if selected == me and view_floor == 2:
+		var locked := _locked_room_at(raw)
+		if locked != "":
+			show_feedback("Ruang %s terkunci. Hanya pemiliknya yang bisa masuk." % locked)
+			return
+	var c := nearest_free(raw, view_floor)
 	_ripple(cell_to_world(c, view_floor))
 	var spot := {"cell": c, "floor": view_floor, "kind": "stand", "yaw": selected.rotation.y, "approach": NONE, "shift": 0.0}
 	if send(selected, spot, "sesuai perintah"):
@@ -2455,6 +2586,11 @@ func _on_js_command(args: Array) -> void:
 			go_exterior()
 		"goto":
 			go_room(arg)
+		"founder":
+			set_founder(arg)
+		"me":
+			if me:
+				focus_agent(me)
 		"detail":
 			if (arg == "1") != full_detail:
 				set_detail(arg == "1")
@@ -2462,6 +2598,10 @@ func _on_js_command(args: Array) -> void:
 			_pix_i = clampi(int(arg), 0, PIXEL_LINES.size() - 1)
 			_apply_pixel_mode()
 		"room":
+			if web_guest:
+				show_feedback("Lantai 3 khusus founder. Masuk sebagai founder untuk melihatnya.")
+				_push_web_state()
+				return
 			for wl in world_labels:
 				if str(wl["name"]).to_lower() == ("ruang " + arg).to_lower():
 					follow = null
@@ -2481,7 +2621,7 @@ func _push_web_state() -> void:
 	for a in agents:
 		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
 			"color": a.shirt_color.to_html(false)})
-	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "pixel": _pix_i, "feedback": feedback.text,
+	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "founder": me.agent_name if me else "", "me_room": room_of(me) if me else "", "guest": web_guest, "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
@@ -2589,6 +2729,9 @@ func _process(d: float) -> void:
 		t_pivot = Vector3(follow.position.x, view_floor * FH, follow.position.z)
 	for a in agents:
 		a.visible = exterior or a.floor_index() <= view_floor
+	for key in founder_npcs:
+		var fa: Agent = founder_npcs[key]
+		fa.visible = exterior or fa.floor_index() <= view_floor
 	for wl in world_labels:
 		var bob: Node3D = wl["bob"]
 		bob.visible = not exterior and wl["floor"] == view_floor
@@ -2636,7 +2779,11 @@ func _maybe_screenshot() -> void:
 	pivot.position = t_pivot
 	if args.size() > 2:
 		for c in args[2].split(";", false):
-			print(run_command(c))
+			if c.begins_with("founder "):
+				set_founder(c.trim_prefix("founder "))
+				print("founder:", me.agent_name if me else "-")
+			else:
+				print(run_command(c))
 	await get_tree().create_timer(float(args[3]) if args.size() > 3 else 4.0).timeout
 	get_viewport().get_texture().get_image().save_png(args[1])
 	get_tree().quit()

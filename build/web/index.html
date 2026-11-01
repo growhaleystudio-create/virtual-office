@@ -42,6 +42,50 @@ header img { height: 22px; }
 header .brand { font-weight: 800; font-size: 18px; letter-spacing: -0.3px; }
 header .sub { color: var(--muted); font-weight: 600; }
 header .live { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+header .acct { flex: none; padding: 7px 14px; font-size: 13px; border-radius: 999px; }
+header .acct.in { background: var(--blue); border-color: var(--blue); }
+#login {
+	position: fixed;
+	inset: 0;
+	z-index: 80;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	padding: 16px;
+	background: rgba(10, 10, 12, 0.7);
+	backdrop-filter: blur(4px);
+}
+#login.open { display: flex; }
+#login form {
+	width: min(380px, 100%);
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	padding: 22px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+#login h2 { margin: 0; font-size: 18px; }
+#login p { margin: 0 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#login label { font-size: 12px; color: var(--muted); font-weight: 600; }
+#login input {
+	font: inherit;
+	font-size: 16px;
+	color: var(--text);
+	background: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 10px 12px;
+}
+#login input:focus { outline: none; border-color: var(--blue); }
+#login .err { color: #ff9a9a; font-size: 13px; min-height: 18px; }
+#login .row2 { display: flex; gap: 8px; margin-top: 4px; }
+#login .row2 .primary { background: var(--blue); border-color: var(--blue); }
+.me-row { display: none; }
+body.is-founder .me-row { display: flex; }
+#floors button.locked::after { content: " \1F512"; }
 header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .layout {
 	height: calc(100% - 56px);
@@ -275,6 +319,8 @@ body.in-call #call { display: flex; }
 	header .sub { display: none; }
 	header .brand { font-size: 16px; }
 	header .live { font-size: 12px; }
+	header .live span:last-child { display: none; }
+	header .acct { padding: 6px 12px; font-size: 12px; }
 	.layout, body.hide-left .layout, body.hide-right .layout, body.hide-left.hide-right .layout {
 		grid-template-columns: 1fr;
 		padding: 0 0 calc(16px + env(safe-area-inset-bottom));
@@ -332,12 +378,33 @@ body.in-call #call { display: flex; }
 		<button id="t-focus" title="Sembunyikan semua panel, frame jadi besar">Layar Lebar</button>
 	</div>
 	<div class="live"><span class="dot"></span><span id="mode">Memuat kantor...</span></div>
+	<button class="acct" id="acct">Masuk Founder</button>
 </header>
+
+<div id="login">
+	<form id="login-form" autocomplete="on">
+		<h2>Masuk Founder</h2>
+		<p>Khusus founder Growhaley. Tamu tetap bisa melihat kantor tanpa masuk.</p>
+		<label for="lg-email">Email</label>
+		<input id="lg-email" type="email" placeholder="nama@growhaley.com" autocomplete="username" required>
+		<label for="lg-pass">Password</label>
+		<input id="lg-pass" type="password" autocomplete="current-password" required>
+		<div class="err" id="lg-err"></div>
+		<div class="row2">
+			<button type="button" id="lg-cancel">Batal</button>
+			<button type="submit" class="primary" id="lg-go">Masuk</button>
+		</div>
+	</form>
+</div>
 
 <div class="layout">
 	<aside class="left">
 		<div class="card">
 			<h3>Tim <span id="team-count"></span></h3>
+			<div class="row me-row sel" id="me-row">
+				<span class="swatch" style="background: #ffd166"></span>
+				<div class="who"><b id="me-name">Kamu</b><small>Founder · karakter kamu</small><div class="status" id="me-room"></div></div>
+			</div>
 			<div id="team"></div>
 		</div>
 		<div class="card">
@@ -527,9 +594,80 @@ $("t-focus").onclick = () => {
 	setPanels(allHidden, allHidden);
 };
 
+// ---------- akses founder (login email + password lewat /api/login) ----------
+let session = null;
+try {
+	session = JSON.parse(localStorage.getItem("ov-founder"));
+	if (!session || !session.token || session.exp < Date.now() / 1000) session = null;
+} catch (e) { session = null; }
+let founderSynced = "";
+function isFounder() { return !!session; }
+function applyAccount() {
+	document.body.classList.toggle("is-founder", isFounder());
+	$("acct").textContent = isFounder() ? session.name + " · Keluar" : "Masuk Founder";
+	$("acct").classList.toggle("in", isFounder());
+	$("me-name").textContent = isFounder() ? session.name + " (kamu)" : "Kamu";
+	$("cmd").disabled = !isFounder();
+	$("cmd").placeholder = isFounder() ? "mis. Sales ke pantry · aku ke ruanganku" : "Khusus founder, masuk dulu";
+	document.querySelectorAll("#chips .chip").forEach((c) => c.style.opacity = isFounder() ? "" : "0.45");
+	document.querySelector('#floors button[data-f="2"]').classList.toggle("locked", !isFounder());
+	refreshMeet();
+}
+function openLogin() {
+	$("lg-err").textContent = "";
+	$("login").classList.add("open");
+	setTimeout(() => $("lg-email").focus(), 50);
+}
+function closeLogin() {
+	$("login").classList.remove("open");
+	$("canvas").focus();
+}
+$("acct").onclick = () => {
+	if (!isFounder()) return openLogin();
+	session = null;
+	try { localStorage.removeItem("ov-founder"); } catch (e) {}
+	if (inCall) leaveCall();
+	send("founder", "");
+	founderSynced = "";
+	applyAccount();
+};
+$("lg-cancel").onclick = closeLogin;
+$("login").onclick = (e) => { if (e.target === $("login")) closeLogin(); };
+$("login-form").onsubmit = async (e) => {
+	e.preventDefault();
+	$("lg-go").disabled = true;
+	$("lg-err").textContent = "Memeriksa...";
+	try {
+		const r = await fetch("/api/login", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ email: $("lg-email").value, password: $("lg-pass").value }),
+		});
+		const d = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(d.error || ("Server login belum siap (" + r.status + ")"));
+		session = d;
+		try { localStorage.setItem("ov-founder", JSON.stringify(d)); } catch (e2) {}
+		$("lg-pass").value = "";
+		closeLogin();
+		applyAccount();
+		syncFounder();
+	} catch (err) {
+		$("lg-err").textContent = err.message;
+	} finally {
+		$("lg-go").disabled = false;
+	}
+};
+function syncFounder() {
+	const want = isFounder() ? session.key : "";
+	if (window.ovCommand && founderSynced !== want) {
+		founderSynced = want;
+		send("founder", want);
+	}
+}
+$("me-row").onclick = () => { send("me"); toGame(); };
+
 // ---------- video meeting (Daily Prebuilt) ----------
 // Hanya bisa dibuka saat kamera ada di ruang meeting; keluar ruangan -> call ditutup setelah hitung mundur.
-const MEET_URL = "https://virtualofficewhaley.daily.co/meeting";
 const LEAVE_GRACE = 8;
 let meetRoom = "";
 let inCall = false;
@@ -545,11 +683,32 @@ function setCallTitle() {
 		t.className = "";
 	}
 }
-function joinCall() {
-	if (!meetRoom || inCall) return;
+async function joinCall() {
+	if (!meetRoom || inCall || !isFounder()) return;
+	$("join-meet").disabled = true;
+	$("meet-info").textContent = "Menyiapkan ruang meeting...";
+	let url = "";
+	try {
+		const r = await fetch("/api/meeting", { method: "POST", headers: { Authorization: "Bearer " + session.token } });
+		const d = await r.json().catch(() => ({}));
+		if (r.status === 401) {
+			session = null;
+			try { localStorage.removeItem("ov-founder"); } catch (e) {}
+			applyAccount();
+			syncFounder();
+			throw new Error("Sesi habis, silakan masuk lagi.");
+		}
+		if (!r.ok) throw new Error(d.error || ("Gagal (" + r.status + ")"));
+		url = d.url;
+	} catch (err) {
+		$("meet-info").textContent = "Tidak bisa membuka meeting: " + err.message;
+		$("join-meet").disabled = !meetRoom;
+		return;
+	}
+	if (!meetRoom) return;
 	const f = document.createElement("iframe");
 	f.allow = "camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-write";
-	f.src = MEET_URL;
+	f.src = url;
 	$("call").append(f);
 	$("call").classList.remove("mini");
 	inCall = true;
@@ -565,15 +724,21 @@ function leaveCall() {
 	leaveTimer = null;
 	$("canvas").focus();
 }
+function refreshMeet() {
+	const name = meetRoom;
+	document.body.classList.toggle("in-meet-room", !!name && isFounder());
+	$("join-meet").disabled = !name || !isFounder();
+	$("meet-where").textContent = name || (isFounder() ? "founder" : "khusus founder");
+	$("meet-info").textContent = !isFounder()
+		? "Video meeting khusus founder. Masuk dulu lewat tombol Masuk Founder."
+		: name
+			? "Kamu di " + name + ". Klik Gabung untuk masuk video call (izinkan kamera & mikrofon)."
+			: "Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.";
+}
 function onMeetRoom(name) {
 	if (name === meetRoom) return;
 	meetRoom = name;
-	document.body.classList.toggle("in-meet-room", !!name);
-	$("join-meet").disabled = !name;
-	$("meet-where").textContent = name || "gratis";
-	$("meet-info").textContent = name
-		? "Kamu di " + name + ". Klik Gabung untuk masuk video call (izinkan kamera & mikrofon)."
-		: "Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.";
+	refreshMeet();
 	if (!inCall) return;
 	if (name) {
 		clearInterval(leaveTimer);
@@ -600,6 +765,8 @@ $("call-size").onclick = () => {
 	const b = $("call").classList.toggle("big");
 	$("call-size").textContent = b ? "Kecil" : "Besar";
 };
+
+applyAccount();
 
 // tab panel di HP
 function setTab(t) {
@@ -661,7 +828,9 @@ window.ovUpdate = function (s) {
 	}
 	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
+	syncFounder();
 	onMeetRoom(s.meeting || "");
+	if (s.me_room) $("me-room").textContent = s.me_room;
 	if (!detailSynced) {
 		detailSynced = true;
 		if ((detailPref === "1") !== s.detail) send("detail", detailPref);
@@ -679,7 +848,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1880048,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1884208,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 

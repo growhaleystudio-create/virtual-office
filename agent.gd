@@ -229,7 +229,7 @@ func _limb(pivot_pos: Vector3, radius: float, length: float, color: Color) -> No
 
 
 func floor_index() -> int:
-	return clampi(roundi(position.y / FLOOR_H), 0, 1)
+	return clampi(roundi(position.y / FLOOR_H), 0, 2)
 
 
 func set_status(s: String) -> void:
