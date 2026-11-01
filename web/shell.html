@@ -258,6 +258,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 .hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .about p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
+.chat-log { max-height: 160px; margin-bottom: 8px; color: var(--text, inherit); }
+.chat-log b { color: var(--blue-l); font-weight: 600; }
+.chat-log .chat-empty { color: var(--muted); }
 .log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
 /* video meeting (Daily) */
 .meet-cta {
@@ -469,6 +472,14 @@ $GODOT_HEAD_INCLUDE
 			</div>
 		</div>
 		<div class="card">
+			<h3>Chat Founder <span id="chat-info">realtime</span></h3>
+			<div class="log chat-log" id="chat-log"><div class="chat-empty">Belum ada obrolan. Pesan muncul sebagai balon di atas kepala.</div></div>
+			<form class="cmd" id="chat-form">
+				<input id="chat" maxlength="140" placeholder="Khusus founder, masuk dulu" autocomplete="off" disabled>
+				<button type="submit" id="chat-go" disabled>Kirim</button>
+			</form>
+		</div>
+		<div class="card">
 			<h3>Perintah</h3>
 			<form class="cmd" id="cmd-form">
 				<input id="cmd" placeholder="mis. Sales ke pantry" autocomplete="off">
@@ -636,6 +647,8 @@ function applyAccount() {
 	document.querySelector('#floors button[data-f="2"]').classList.toggle("locked", !isFounder());
 	refreshMeet();
 	netTrack();
+	$("chat").disabled = $("chat-go").disabled = !isFounder();
+	$("chat").placeholder = isFounder() ? "Tulis pesan (balon di atas kepalamu)" : "Khusus founder, masuk dulu";
 }
 function openLogin() {
 	$("lg-err").textContent = "";
@@ -830,6 +843,32 @@ document.addEventListener("fullscreenchange", () => {
 // Tanpa konfigurasi Supabase (/api/net-config kosong) dipakai BroadcastChannel: hanya antar-tab
 // di browser yang sama, berguna untuk tes lokal.
 const SUPABASE_JS = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
+// chat: {k, name, text}. Pesan sendiri langsung ditampilkan (broadcast self: false).
+function chatShow(m) {
+	if (!m || !m.text || !FOUNDERS.some((f) => f[2] === m.k)) return;
+	const text = String(m.text).slice(0, 140);
+	send("chat", JSON.stringify({ k: m.k, text }));
+	const log = $("chat-log");
+	const empty = log.querySelector(".chat-empty");
+	if (empty) empty.remove();
+	const line = el("div");
+	line.append(el("b", "", (m.name || m.k) + ": "), document.createTextNode(text));
+	log.append(line);
+	while (log.childElementCount > 50) log.firstChild.remove();
+	log.scrollTop = log.scrollHeight;
+}
+let chatLast = 0;
+$("chat-form").onsubmit = (e) => {
+	e.preventDefault();
+	const text = $("chat").value.trim().slice(0, 140);
+	if (!text || !isFounder() || Date.now() - chatLast < 800) return;
+	chatLast = Date.now();
+	const m = { k: session.key, name: session.name, text };
+	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "chat", payload: m });
+	else if (net.bc) net.bc.postMessage({ t: "chat", m });
+	chatShow(m);
+	$("chat").value = "";
+};
 window.ovNetSend = function (json) {
 	if (!isFounder()) return;
 	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "st", payload: { j: json } });
@@ -876,6 +915,7 @@ async function netStart() {
 			const ch = sb.channel("growhaley-office", { config: { broadcast: { self: false }, presence: { key: net.id } } });
 			ch.on("broadcast", { event: "st" }, ({ payload }) => payload && payload.j && send("net_state", payload.j));
 			ch.on("broadcast", { event: "hello" }, () => send("net_sync"));
+			ch.on("broadcast", { event: "chat" }, ({ payload }) => chatShow(payload));
 			ch.on("presence", { event: "sync" }, () => {
 				const keys = [];
 				for (const metas of Object.values(ch.presenceState())) for (const m of metas) if (m.key) keys.push(m.key);
@@ -900,6 +940,7 @@ async function netStart() {
 	net.bc = new BroadcastChannel("growhaley-office");
 	net.bc.onmessage = ({ data: m }) => {
 		if (m.t === "st") send("net_state", m.j);
+		else if (m.t === "chat") chatShow(m.m);
 		else if (m.t === "hello") {
 			send("net_sync");
 			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });

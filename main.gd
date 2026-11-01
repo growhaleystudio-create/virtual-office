@@ -2642,6 +2642,11 @@ func _on_js_command(args: Array) -> void:
 		"net_sync":
 			_net_send()
 			return
+		"chat":
+			var m = JSON.parse_string(arg)
+			if m is Dictionary and founder_npcs.has(str(m.get("k", ""))):
+				show_bubble(founder_npcs[str(m["k"])], str(m.get("text", "")))
+			return
 	_push_web_state()
 
 
@@ -2776,6 +2781,7 @@ func _process(d: float) -> void:
 		bob.scale = bob.scale.lerp(Vector3.ONE * sc, minf(1.0, 12.0 * d))
 		wl["label"].visible = false
 	_update_tooltip()
+	_update_bubbles()
 
 	_status_timer -= d
 	if _status_timer <= 0.0:
@@ -2816,7 +2822,9 @@ func _maybe_screenshot() -> void:
 	pivot.position = t_pivot
 	if args.size() > 2:
 		for c in args[2].split(";", false):
-			if c.begins_with("founder "):
+			if c.begins_with("chat "):
+				show_bubble(me if me else agents[0], c.trim_prefix("chat "))
+			elif c.begins_with("founder "):
 				set_founder(c.trim_prefix("founder "))
 				print("founder:", me.agent_name if me else "-")
 			else:
@@ -2899,3 +2907,71 @@ func _send_home(k: String) -> void:
 		var y_: float = seat["yaw"]
 		fa.position = cell_to_world(seat["cell"], 2) + Vector3(sin(y_), 0, cos(y_)) * 0.2
 		fa.begin_move([fa.position], "sit", y_, "di ruangan")
+
+
+# ---------- balon chat di atas kepala ----------
+
+const BUBBLE_TIME := 7.0
+var _bubbles := []  # [{agent, panel, until}]
+
+
+func show_bubble(a: Agent, text: String) -> void:
+	text = text.strip_edges().left(140)
+	if text == "" or _fx_root == null:
+		return
+	for b in _bubbles.duplicate():
+		if b["agent"] == a:
+			b["panel"].queue_free()
+			_bubbles.erase(b)
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.96)
+	sb.border_color = Color(0.09, 0.49, 0.71)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(10)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 5
+	sb.content_margin_bottom = 6
+	pc.add_theme_stylebox_override("panel", sb)
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 0)
+	pc.add_child(vb)
+	var who := Label.new()
+	who.text = a.agent_name
+	who.add_theme_font_size_override("font_size", 11)
+	who.add_theme_color_override("font_color", Color(0.09, 0.49, 0.71))
+	vb.add_child(who)
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", Color(0.14, 0.14, 0.15))
+	var w := minf(260.0, l.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 4.0)
+	l.custom_minimum_size.x = maxf(w, 40.0)
+	vb.add_child(l)
+	_fx_root.add_child(pc)
+	_bubbles.append({"agent": a, "panel": pc, "until": Time.get_ticks_msec() / 1000.0 + BUBBLE_TIME})
+	if a != me and (not web_guest or a.floor_index() < 2):
+		show_feedback("%s: %s" % [a.agent_name, text])
+
+
+func _update_bubbles() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	for b in _bubbles.duplicate():
+		var pc: PanelContainer = b["panel"]
+		var a: Agent = b["agent"]
+		if now > b["until"]:
+			pc.queue_free()
+			_bubbles.erase(b)
+			continue
+		var head := a.global_position + Vector3(0, 2.9, 0)
+		var show := a.visible and not exterior and not (web_guest and a.floor_index() >= 2) and not cam.is_position_behind(head)
+		pc.visible = show
+		if not show:
+			continue
+		var p := cam.unproject_position(head) * Vector2(1280.0 / svp.size.x, 720.0 / svp.size.y)
+		pc.reset_size()
+		pc.position = Vector2(p.x - pc.size.x / 2.0, p.y - pc.size.y)
+		pc.modulate.a = clampf((b["until"] - now) / 0.6, 0.0, 1.0)
