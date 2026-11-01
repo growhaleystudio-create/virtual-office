@@ -39,6 +39,7 @@ var _ball_t := 1.0
 var _ball_wait := 1.0
 var _jet: MeshInstance3D
 var _t := 0.0
+var lite := false  # HP: separuh NPC, pejalan kaki lebih sedikit
 
 
 func build(seed_: int = 7) -> void:
@@ -59,6 +60,8 @@ func build(seed_: int = 7) -> void:
 	_spawn_cars()
 	_spawn_peds()
 	_spawn_sky()
+	if lite:
+		_thin_npcs()
 	# gabungkan mesh: statis jadi satu kelompok, bangunan & kendaraan per node
 	Look.batch(stat, true)
 	for bd in buildings:
@@ -943,7 +946,7 @@ func _walk_z(near: bool) -> float:
 
 
 func _spawn_peds() -> void:
-	for i in 34:
+	for i in (14 if lite else 34):
 		var a := Agent.new()
 		a.setup("warga", PED_SHIRTS[i % PED_SHIRTS.size()], PED_HAIR[rng.randi() % PED_HAIR.size()])
 		a.position = Vector3(rng.randf_range(-110, 110), 0.1, _walk_z(i % 2 == 0))
@@ -975,6 +978,18 @@ func _ped_next(a: Agent) -> void:
 		pts.append(Vector3(tx, 0.1, lane_z))
 	a.begin_move(pts, "stand", rng.randf() * TAU, "jalan-jalan")
 	a.think = rng.randf_range(0.5, 4.0)
+
+
+## Mode ringan: buang separuh NPC kota (pemain basket tetap ada).
+func _thin_npcs() -> void:
+	var keep: Array = []
+	for i in npcs.size():
+		var a: Agent = npcs[i]
+		if i % 2 == 0 or a in players or a in peds:
+			keep.append(a)
+		else:
+			a.queue_free()
+	npcs = keep
 
 
 # ---------- langit: awan & burung ----------

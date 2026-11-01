@@ -113,6 +113,8 @@ var town  # lingkungan kota (town.gd)
 var roster_rows: VBoxContainer
 var _status_timer := 0.0
 var bridge: Bridge
+## HP (browser Android/iOS): mode ringan supaya lancar di GPU/CPU HP.
+var lite := OS.has_feature("web_android") or OS.has_feature("web_ios")
 
 
 func _ready() -> void:
@@ -283,7 +285,7 @@ func _build_env() -> void:
 	sun.rotation_degrees = Vector3(-52, -35, 0)
 	sun.light_color = Color(1.0, 0.92, 0.78)
 	sun.light_energy = sun_e
-	sun.shadow_enabled = true
+	sun.shadow_enabled = not lite  # bayangan = render ulang scene, paling berat di HP
 	sun.shadow_opacity = 0.75
 	sun.directional_shadow_max_distance = 160.0
 	sun.directional_shadow_blend_splits = true
@@ -609,6 +611,7 @@ func _build_world() -> void:
 	_build_outside()
 	town = preload("res://town.gd").new()
 	town.name = "Kota"
+	town.lite = lite
 	add_child(town)
 	town.build()
 	_build_floor0()
@@ -1237,117 +1240,101 @@ const EXT_ENTER := 44.0  # zoom lebih jauh dari ini -> tampak luar
 const EXT_LEAVE := 40.0
 
 
-## Prisma dari poligon cembung di bidang XY (dunia), diekstrusi dari z0 ke z1.
-func _prism(parent: Node3D, pts: Array, z0: float, z1: float, color: Color, tex := "metal") -> MeshInstance3D:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var n := pts.size()
-	var cen := Vector2.ZERO
-	for q: Vector2 in pts:
-		cen += q / n
-	var tri := func(a: Vector3, b: Vector3, c: Vector3, nrm: Vector3) -> void:
-		if (b - a).cross(c - a).dot(nrm) > 0.0:  # Godot: sisi depan searah jarum jam
-			var t := b
-			b = c
-			c = t
-		for v in [a, b, c]:
-			st.set_normal(nrm)
-			st.add_vertex(v)
-	for i in range(1, n - 1):
-		for z: float in [z0, z1]:
-			var nz := Vector3(0, 0, signf(z - (z0 + z1) / 2.0))
-			tri.call(Vector3(pts[0].x, pts[0].y, z), Vector3(pts[i].x, pts[i].y, z), Vector3(pts[i + 1].x, pts[i + 1].y, z), nz)
-	for i in n:
-		var a: Vector2 = pts[i]
-		var b: Vector2 = pts[(i + 1) % n]
-		var e := b - a
-		var on := Vector2(e.y, -e.x).normalized()
-		if on.dot((a + b) / 2.0 - cen) < 0.0:
-			on = -on
-		var nrm := Vector3(on.x, on.y, 0)
-		tri.call(Vector3(a.x, a.y, z0), Vector3(b.x, b.y, z0), Vector3(b.x, b.y, z1), nrm)
-		tri.call(Vector3(a.x, a.y, z0), Vector3(b.x, b.y, z1), Vector3(a.x, a.y, z1), nrm)
-	var m := MeshInstance3D.new()
-	m.mesh = st.commit()
-	m.material_override = Look.mat(color, tex)
-	parent.add_child(m)
-	return m
-
-
-## Atap lipat zig-zag khas (folded-plate / "butterfly" berderet) di atas lantai 3,
-## kaca segitiga di ujung tiap lipatan, menara kaca di atas tangga, papan logo di punggung atap.
-## Hanya tampil saat kamera zoom out (tampak luar); saat zoom in atap terangkat & hilang.
+## Atap modern: pelat datar tipis putih yang "melayang" di atas pita kaca gelap, sofit kayu,
+## kanopi menjorok ke teras dengan pergola & kolom ramping, atap hijau + panel surya,
+## menara tangga gelap berlogo; ditambah lis lantai putih & sirip kayu (hanya saat tampak luar).
 func _build_roof() -> void:
 	roof = Node3D.new()
 	roof.name = "Atap"
 	add_child(roof)
 	roof.set_meta("no_batch", true)
+	var white := Color(0.84, 0.84, 0.82)
+	var dark_glass := Color(0.22, 0.30, 0.36)
 	var y_top := 2.0 * FH + 3.0
-	var zn := -H / 2.0 - 0.9  # sisi utara (sedikit menjorok)
-	var zs := 18.0 - H / 2.0 + 1.9  # sisi selatan: kanopi lebar menaungi fasad kaca lantai 3
-	var xe := W / 2.0 + 0.9
-	# pelat atap tebal + garis biru muda
-	Agent.make_box(roof, Vector3(0, y_top + 0.15, (zn + zs) / 2.0), Vector3(xe * 2.0, 0.3, zs - zn), BRAND_INK, "metal")
-	Agent.make_box(roof, Vector3(0, y_top + 0.06, (zn + zs) / 2.0), Vector3(xe * 2.0 + 0.08, 0.08, zs - zn + 0.08), BRAND_LIGHT, "metal")
-	var y0 := y_top + 0.3
-	var nb := 6
-	var bw := xe * 2.0 / nb
-	var yr := y0 + 2.2  # punggung lipatan
-	var yv := y0 + 0.45  # lembah lipatan
-	var pz0 := zn - 0.3
-	var pz1 := zs + 0.4
-	var depth := pz1 - pz0
-	var pzc := (pz0 + pz1) / 2.0
-	var glass := Color(0.60, 0.82, 0.96, 0.5)
-	for i in nb:
-		var xl := -xe + i * bw
-		var xr := xl + bw
-		var xc := xl + bw / 2.0
-		var col: Color = BRAND_BLUE if i % 2 == 0 else BRAND_BLUE.lightened(0.12)
-		for seg in [[Vector2(xl, yr), Vector2(xc, yv)], [Vector2(xc, yv), Vector2(xr, yr)]]:
-			var a: Vector2 = seg[0]
-			var b: Vector2 = seg[1]
-			var mid := (a + b) / 2.0
-			var p := Agent.make_box(roof, Vector3(mid.x, mid.y, pzc), Vector3(a.distance_to(b) + 0.12, 0.16, depth), col, "metal")
-			p.rotation.z = atan2(b.y - a.y, b.x - a.x)
-		# talang di lembah
-		Agent.make_box(roof, Vector3(xc, yv + 0.05, pzc), Vector3(0.4, 0.1, depth + 0.05), BRAND_INK, "metal")
-		# kaca segitiga di ujung utara & selatan lipatan, dengan kusen
-		for gz: float in [zn + 0.15, zs - 0.15]:
-			var pts := [Vector2(xl, y0), Vector2(xl, yr - 0.1), Vector2(xc, yv - 0.1), Vector2(xr, yr - 0.1), Vector2(xr, y0)]
-			_prism(roof, pts, gz - 0.03, gz + 0.03, glass)
-			for f: float in [0.0, 0.25, 0.75]:
-				var mx := xl + bw * f
-				var top := lerpf(yr, yv, f * 2.0 if f <= 0.5 else (1.0 - f) * 2.0)
-				Agent.make_box(roof, Vector3(mx, (y0 + top) / 2.0, gz), Vector3(0.12, top - y0, 0.14), BRAND_INK, "metal")
-			Agent.make_box(roof, Vector3(xc, y0 + 0.08, gz), Vector3(bw, 0.16, 0.16), BRAND_INK, "metal")
-	# tutup punggung lipatan
-	for i in nb + 1:
-		Agent.make_box(roof, Vector3(-xe + i * bw, yr + 0.07, pzc), Vector3(0.32, 0.14, depth + 0.06), BRAND_LIGHT, "metal")
-	for gz: float in [zn + 0.15, zs - 0.15]:
-		Agent.make_box(roof, Vector3(xe, (y0 + yr) / 2.0, gz), Vector3(0.12, yr - y0, 0.14), BRAND_INK, "metal")
+	var hw := W / 2.0 + WALL_T  # setengah lebar bangunan termasuk dinding
+	var zn := -H / 2.0 - WALL_T  # muka utara
+	var z3 := 18.0 - H / 2.0  # muka selatan lantai 3 (fasad kaca)
+	var zs := H / 2.0 + WALL_T  # muka selatan bangunan
 
-	# menara kaca di atas tangga (lantern), atap pink
-	var lc := Vector3(STAIR_X0 + 3.0 - W / 2.0, y0, STAIR2_Z + 1.0 - H / 2.0)
-	var ls := Vector3(5.2, 3.6, 3.4)
-	Agent.make_box(roof, lc + Vector3(0, ls.y / 2.0, 0), ls, Color(0.70, 0.88, 0.97, 0.55))
+	# pita kaca gelap (clerestory) di atas dinding lantai 3 -> pelat atap seolah melayang
+	var gh := 0.55
+	var gy := y_top + gh / 2.0
+	Agent.make_box(roof, Vector3(0, gy, zn + 0.1), Vector3(hw * 2.0, gh, 0.2), dark_glass, "grain")
+	Agent.make_box(roof, Vector3(0, gy, z3), Vector3(hw * 2.0, gh, 0.2), dark_glass, "grain")
 	for sx: float in [-1.0, 1.0]:
-		for sz: float in [-1.0, 1.0]:
-			Agent.make_box(roof, lc + Vector3(sx * ls.x / 2.0, ls.y / 2.0, sz * ls.z / 2.0), Vector3(0.16, ls.y, 0.16), BRAND_INK, "metal")
-		Agent.make_box(roof, lc + Vector3(sx * ls.x / 2.0, ls.y * 0.5, 0), Vector3(0.1, 0.1, ls.z), BRAND_INK, "metal")
-	for sz: float in [-1.0, 1.0]:
-		Agent.make_box(roof, lc + Vector3(0, ls.y * 0.5, sz * ls.z / 2.0), Vector3(ls.x, 0.1, 0.1), BRAND_INK, "metal")
-	Agent.make_box(roof, lc + Vector3(0, ls.y + 0.12, 0), Vector3(ls.x + 0.8, 0.24, ls.z + 0.8), BRAND_PINK, "metal")
-	_prism(roof, [Vector2(lc.x - ls.x / 2.0 - 0.2, lc.y + ls.y + 0.24), Vector2(lc.x, lc.y + ls.y + 1.3),
-		Vector2(lc.x + ls.x / 2.0 + 0.2, lc.y + ls.y + 0.24)], lc.z - ls.z / 2.0 - 0.2, lc.z + ls.z / 2.0 + 0.2, BRAND_PINK.darkened(0.15))
+		Agent.make_box(roof, Vector3(sx * (hw - 0.1), gy, (zn + z3) / 2.0), Vector3(0.2, gh, z3 - zn), dark_glass, "grain")
 
-	# papan logo besar berdiri di punggung atap tengah, menghadap jalan (selatan)
-	var bp := Vector3(0.0, yr + 2.0, zn + 3.0)
-	for sx: float in [-3.6, 3.6]:
-		Agent.make_box(roof, Vector3(sx, (y0 + bp.y) / 2.0, bp.z - 0.2), Vector3(0.18, bp.y - y0, 0.18), Color(0.3, 0.3, 0.32), "metal")
-	Agent.make_box(roof, bp + Vector3(0, 0, -0.08), Vector3(8.6, 2.9, 0.15), BRAND_INK, "metal")
-	var rn := _facing_node(roof, bp, Vector3(0, 0, 1))
-	_picture(rn, Vector3.ZERO, Vector2(8.3, 2.77), "sign_blue")
+	# pelat atap utama + kanopi teras
+	var sy := y_top + gh
+	var st := 0.38
+	var ox := hw + 1.4
+	var zn2 := zn - 1.2
+	var zc := z3 + 1.0  # batas pelat utama / mulai kanopi
+	var zk := z3 + 4.6  # ujung kanopi
+	Agent.make_box(roof, Vector3(0, sy + st / 2.0, (zn2 + zc) / 2.0), Vector3(ox * 2.0, st, zc - zn2), white, "grain")
+	Agent.make_box(roof, Vector3(0, sy - 0.03, (zn2 + zc) / 2.0), Vector3(ox * 2.0 - 0.3, 0.06, zc - zn2 - 0.3), WOOD, "planks")
+	# kanopi: pelat di kiri & kanan, pergola kayu di tengah
+	var hole := [-13.0, 1.0]
+	for seg in [[-ox, hole[0]], [hole[1], ox]]:
+		var cx: float = (seg[0] + seg[1]) / 2.0
+		var w: float = seg[1] - seg[0]
+		Agent.make_box(roof, Vector3(cx, sy + st / 2.0, (zc + zk) / 2.0), Vector3(w, st, zk - zc), white, "grain")
+		Agent.make_box(roof, Vector3(cx, sy - 0.03, (zc + zk) / 2.0), Vector3(w - 0.3, 0.06, zk - zc - 0.3), WOOD, "planks")
+	Agent.make_box(roof, Vector3((hole[0] + hole[1]) / 2.0, sy + st / 2.0, zk - 0.2), Vector3(hole[1] - hole[0], st, 0.4), white, "grain")
+	var px: float = hole[0] + 0.5
+	while px < hole[1] - 0.2:
+		Agent.make_box(roof, Vector3(px, sy + 0.12, (zc + zk) / 2.0), Vector3(0.12, 0.24, zk - zc), WOOD, "planks")
+		px += 0.6
+	# kolom ramping penopang kanopi, berdiri di teras lantai 2
+	for cx2: float in [-ox + 0.6, hole[0], hole[1], 11.0, ox - 0.6]:
+		var y1 := FH
+		Agent.make_box(roof, Vector3(cx2, (y1 + sy) / 2.0, zk - 0.6), Vector3(0.16, sy - y1, 0.16), BRAND_INK, "metal")
+
+	# di atas atap: atap hijau (barat) & panel surya (timur), dengan tepi kerikil
+	var ry := sy + st
+	Agent.make_box(roof, Vector3(-11.5, ry + 0.06, (zn + z3) / 2.0 - 0.5), Vector3(19.0, 0.12, z3 - zn - 3.0), Color(0.45, 0.62, 0.33), "grass", 0.5)
+	for i in 9:
+		var bx := -20.0 + i * 2.1
+		Agent.make_ball(roof, Vector3(bx, ry + 0.35, -13.2 + (i % 3) * 0.5), 0.45 + (i % 2) * 0.15, Color(0.36, 0.56, 0.30), Vector3(1, 0.8, 1), "leaves")
+	for r in 5:
+		for c in 7:
+			var sp := Agent.make_box(roof, Vector3(1.0 + c * 2.6 + 2.5, ry + 0.35, -13.0 + r * 2.6), Vector3(2.3, 0.07, 1.4), Color(0.13, 0.19, 0.33), "metal", 1.0)
+			sp.rotation.x = -0.3
+			Agent.make_box(roof, Vector3(1.0 + c * 2.6 + 2.5, ry + 0.15, -13.0 + r * 2.6 + 0.4), Vector3(0.08, 0.3, 0.08), Color(0.6, 0.6, 0.62), "metal")
+
+	# menara tangga: kotak gelap menjulang, pelat putih di puncak, logo menghadap jalan
+	var tx0 := STAIR_X0 - W / 2.0
+	var tx1 := STAIR_X1 - W / 2.0
+	var tz0 := STAIR2_Z - 2.0 - H / 2.0
+	var tz1 := STAIR2_Z + 3.0 - H / 2.0
+	var th := 4.4
+	var tc := Vector3((tx0 + tx1) / 2.0, y_top + th / 2.0, (tz0 + tz1) / 2.0)
+	Agent.make_box(roof, tc, Vector3(tx1 - tx0, th, tz1 - tz0), BRAND_INK, "stone")
+	Agent.make_box(roof, Vector3(tc.x, y_top + th + 0.12, tc.z), Vector3(tx1 - tx0 + 0.8, 0.24, tz1 - tz0 + 0.8), white, "grain")
+	Agent.make_box(roof, Vector3(tx1 + 0.01, y_top + th / 2.0 + 0.3, tc.z), Vector3(0.04, th - 1.6, 1.0), dark_glass.lightened(0.25), "grain")
+	var ln := _facing_node(roof, Vector3(tc.x, y_top + th - 1.3, tz1 + 0.02), Vector3(0, 0, 1))
+	_picture(ln, Vector3.ZERO, Vector2(5.4, 1.8), "sign_blue")
+
+	# lis lantai putih di tiap tingkat (garis horizontal khas gedung modern)
+	for lv in [[FH, zs], [2.0 * FH, z3]]:
+		var y: float = lv[0]
+		var zb: float = lv[1]
+		Agent.make_box(roof, Vector3(0, y, zn - 0.12), Vector3(hw * 2.0 + 0.5, 0.3, 0.26), white, "grain")
+		for sx: float in [-1.0, 1.0]:
+			Agent.make_box(roof, Vector3(sx * (hw + 0.12), y, (zn + zb) / 2.0), Vector3(0.26, 0.3, zb - zn + 0.24), white, "grain")
+	Agent.make_box(roof, Vector3(0, FH, zs + 0.12), Vector3(hw * 2.0 + 0.5, 0.3, 0.26), white, "grain")
+	# sirip kayu vertikal di depan fasad kaca lantai 3 (peneduh)
+	var fy := 2.0 * FH + 1.6
+	var fx := -hw + 0.4
+	while fx < hw:
+		Agent.make_box(roof, Vector3(fx, fy, z3 + 0.3), Vector3(0.1, 3.0, 0.35), WOOD, "planks")
+		Agent.make_box(roof, Vector3(fx, fy, zn - 0.25), Vector3(0.1, 3.0, 0.3), WOOD, "planks")
+		fx += 0.9
+	var fz := zn + 0.5
+	while fz < z3:
+		for sx: float in [-1.0, 1.0]:
+			Agent.make_box(roof, Vector3(sx * (hw + 0.25), fy, fz), Vector3(0.3, 3.0, 0.1), WOOD, "planks")
+		fz += 0.9
 
 
 ## Masuk/keluar tampak luar (dipanggil otomatis dari zoom kamera).
