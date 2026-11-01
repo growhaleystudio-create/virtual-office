@@ -120,6 +120,11 @@ var me: Agent = null
 var founder_npcs := {}  # key -> Agent (duduk di ruangnya masing-masing)
 var founder_seats := {}  # key -> {cell, yaw, rect, name}
 var _my_grid2: AStarGrid2D  # grid lantai 3 khusus `me`: ruang founder lain tertutup
+var me_key := ""
+## Multiplayer: founder yang sedang online di perangkat lain (key -> true). Karakternya
+## digerakkan oleh pesan dari halaman web (Supabase Realtime), bukan oleh komputer ini.
+var net_online := {}
+var _net_hb := 0.0
 ## Detail lingkungan. Penuh = kota (NPC, kendaraan, gedung tetangga) + bayangan.
 ## Ringan = hanya kantor & halaman, tanpa bayangan (untuk HP / laptop lemah).
 ## Web mulai Ringan (kota baru dibangun saat pemain memilih Penuh); desktop mulai Penuh.
@@ -1390,12 +1395,17 @@ func _me_command(t: String) -> String:
 
 ## Login / logout founder (dipanggil dari halaman web). key "" = keluar jadi tamu.
 func set_founder(key: String) -> void:
+	if me and key == me_key:
+		return
 	if me:
 		me.set_selected(false)
 		if me.plumbob:
 			me.plumbob.queue_free()
 			me.plumbob = null
+		if key == "":
+			_send_home(me_key)
 	me = founder_npcs.get(key)
+	me_key = key if me else ""
 	web_guest = me == null and OS.has_feature("web")
 	_my_grid2 = null
 	if me == null:
@@ -1415,10 +1425,13 @@ func set_founder(key: String) -> void:
 		for z in H:
 			var c := Vector2i(x, z)
 			_my_grid2.set_point_solid(c, grids[2].is_point_solid(c) or _locked_room_at(c) != "")
+	if me.plumbob:
+		me.plumbob.queue_free()
 	me.plumbob = Agent.make_plumbob(me, 0.42, Color(1.0, 0.82, 0.25))
 	me.plumbob.position.y = 2.35
 	me.think = 1e9
 	focus_agent(me)
+	_net_send()
 	show_feedback("Halo %s! Klik lantai untuk berjalan, klik karyawan untuk memberi perintah." % me.agent_name)
 
 
@@ -1813,6 +1826,7 @@ func _build_agents() -> void:
 		fa.think = 1e9
 		add_child(fa)
 		fa.begin_move([fa.position], "sit", y_, "di ruangan")
+		fa.move_started.connect(_on_founder_move)
 		founder_npcs[info[2]] = fa
 		i += 1
 	# berlian hijau melayang di atas tiap ruangan (nama muncul saat di-hover)
@@ -2613,6 +2627,21 @@ func _on_js_command(args: Array) -> void:
 ", 1)])
 		"run":
 			feedback.text = run_command(arg)
+		"focus_founder":
+			var fa: Agent = founder_npcs.get(arg)
+			if fa:
+				if web_guest and fa.floor_index() >= 2:
+					show_feedback("%s sedang di lantai 3 (khusus founder)" % fa.agent_name)
+				else:
+					focus_agent(fa)
+		"net_state":
+			_net_receive(arg)
+			return
+		"net_online":
+			_net_set_online(arg)
+		"net_sync":
+			_net_send()
+			return
 	_push_web_state()
 
 
@@ -2621,7 +2650,12 @@ func _push_web_state() -> void:
 	for a in agents:
 		list.append({"name": a.agent_name, "title": a.title, "room": room_of(a), "status": a.status,
 			"color": a.shirt_color.to_html(false)})
-	var st := {"agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "founder": me.agent_name if me else "", "me_room": room_of(me) if me else "", "guest": web_guest, "pixel": _pix_i, "feedback": feedback.text,
+	var online := {}
+	for k in net_online:
+		online[k] = room_of(founder_npcs[k])
+	if me:
+		online[me_key] = room_of(me)
+	var st := {"founders": online, "agents": list, "floor": view_floor, "exterior": exterior, "detail": full_detail, "meeting": meeting_here(), "founder": me.agent_name if me else "", "me_room": room_of(me) if me else "", "guest": web_guest, "pixel": _pix_i, "feedback": feedback.text,
 		"selected": selected.agent_name if selected else "", "online": bridge_label.text}
 	JavaScriptBridge.eval("window.ovUpdate && window.ovUpdate(%s)" % JSON.stringify(st), true)
 
@@ -2748,6 +2782,9 @@ func _process(d: float) -> void:
 		_status_timer = 0.3
 		if OS.has_feature("web"):
 			_push_web_state()
+	_net_hb -= d
+	if _net_hb <= 0.0:
+		_net_send()
 		for a in agents:
 			var b: Button = roster_buttons[a]
 			b.text = "    %s  ·  %s  ·  %s%s" % [a.agent_name, room_of(a), a.status, "  (nyata)" if a.showing_ext() else ""]
@@ -2787,3 +2824,78 @@ func _maybe_screenshot() -> void:
 	await get_tree().create_timer(float(args[3]) if args.size() > 3 else 4.0).timeout
 	get_viewport().get_texture().get_image().save_png(args[1])
 	get_tree().quit()
+
+
+# ---------- multiplayer (founder online saling melihat) ----------
+# Godot hanya menyiapkan / menerapkan keadaan karakter. Pengiriman lewat Supabase Realtime
+# dikerjakan halaman web (shell.html): window.ovNetSend(json) keluar, ovCommand("net_state") masuk.
+
+## Kirim keadaan karakter sendiri ke pemain lain (saat mulai jalan + detak tiap 15 detik;
+## jarang supaya kuota pesan Supabase gratis awet, penonton baru minta sinkron lewat net_sync).
+func _net_send() -> void:
+	_net_hb = 15.0
+	if me == null or not OS.has_feature("web"):
+		return
+	var win := JavaScriptBridge.get_interface("window")
+	if win and win.ovNetSend:
+		win.ovNetSend(JSON.stringify({"k": me_key, "s": me.net_state()}))
+
+
+func _on_founder_move(a: Agent) -> void:
+	if a == me:
+		_net_send()
+
+
+func _net_receive(json: String) -> void:
+	var m = JSON.parse_string(json)
+	if not (m is Dictionary):
+		return
+	var k := str(m.get("k", ""))
+	if k == me_key or not founder_npcs.has(k) or not (m.get("s") is Dictionary):
+		return
+	if not net_online.has(k):
+		_net_mark_online(k)
+	founder_npcs[k].apply_net_state(m["s"])
+
+
+## Daftar founder online (dipisah koma) dari presence Supabase.
+func _net_set_online(csv: String) -> void:
+	var now := {}
+	for k in csv.split(",", false):
+		if founder_npcs.has(k) and k != me_key:
+			now[k] = true
+	for k in net_online.keys():
+		if not now.has(k):
+			net_online.erase(k)
+			var fa: Agent = founder_npcs[k]
+			if fa.plumbob:
+				fa.plumbob.queue_free()
+				fa.plumbob = null
+			_send_home(k)
+			show_feedback("%s keluar dari kantor" % fa.agent_name)
+	for k in now:
+		if not net_online.has(k):
+			_net_mark_online(k)
+			show_feedback("%s masuk ke kantor" % founder_npcs[k].agent_name)
+
+
+func _net_mark_online(k: String) -> void:
+	net_online[k] = true
+	var fa: Agent = founder_npcs[k]
+	if fa.plumbob == null:
+		fa.plumbob = Agent.make_plumbob(fa, 0.42, Color(0.35, 0.75, 1.0))
+		fa.plumbob.position.y = 2.35
+	fa.think = 1e9
+
+
+## Founder yang offline / keluar berjalan kembali ke kursinya.
+func _send_home(k: String) -> void:
+	if not founder_seats.has(k):
+		return
+	var seat: Dictionary = founder_seats[k]
+	var spot := {"cell": seat["cell"], "floor": 2, "kind": "sit", "yaw": seat["yaw"], "approach": NONE, "shift": 0.2}
+	if not send(founder_npcs[k], spot, "di ruangan"):
+		var fa: Agent = founder_npcs[k]
+		var y_: float = seat["yaw"]
+		fa.position = cell_to_world(seat["cell"], 2) + Vector3(sin(y_), 0, cos(y_)) * 0.2
+		fa.begin_move([fa.position], "sit", y_, "di ruangan")

@@ -83,8 +83,8 @@ header .acct.in { background: var(--blue); border-color: var(--blue); }
 #login .err { color: #ff9a9a; font-size: 13px; min-height: 18px; }
 #login .row2 { display: flex; gap: 8px; margin-top: 4px; }
 #login .row2 .primary { background: var(--blue); border-color: var(--blue); }
-.me-row { display: none; }
-body.is-founder .me-row { display: flex; }
+.row.me-row { display: none; }
+body.is-founder .row.me-row { display: flex; }
 #floors button.locked::after { content: " \1F512"; }
 header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .layout {
@@ -131,6 +131,10 @@ aside::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .who b { display: block; font-size: 14px; }
 .who small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status { font-size: 11px; color: var(--blue-l); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.founder { position: relative; }
+.founder .net { font-size: 11px; color: var(--muted); }
+.founder.online .net { color: #3fbf6f; font-weight: 600; }
+.founder.online img { outline: 2px solid #3fbf6f; outline-offset: 1px; }
 .founder img { width: 40px; height: 52px; object-fit: cover; object-position: center 15%; border-radius: 6px; flex: none; background: #e9edf1; }
 .stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; gap: 8px; }
 .frame {
@@ -406,7 +410,7 @@ $GODOT_HEAD_INCLUDE
 			<div id="team"></div>
 		</div>
 		<div class="card">
-			<h3>Founder <span>Lantai 3</span></h3>
+			<h3>Founder <span id="net-info">Lantai 3</span></h3>
 			<div id="founders"></div>
 		</div>
 	</aside>
@@ -528,6 +532,8 @@ const FOUNDERS = [
 	["Luthfi", "AI Experience Designer", "luthfi"],
 ];
 const $ = (id) => document.getElementById(id);
+// keadaan multiplayer (lihat bagian "multiplayer" di bawah)
+const net = { id: Math.random().toString(36).slice(2, 10), ch: null, ok: false, bc: null, seen: {}, online: [], godot: false, tracked: "" };
 function send(cmd, arg) {
 	if (window.ovCommand) {
 		window.ovCommand(cmd, String(arg ?? ""));
@@ -540,17 +546,36 @@ function el(tag, cls, text) {
 	return e;
 }
 
-// panel founder (statis)
+// panel founder: yang online (multiplayer) ditandai hijau + posisinya; klik = kamera ikut dia
+const founderRows = {};
+let founderWhere = {};
 for (const [name, role, key] of FOUNDERS) {
 	const r = el("div", "row founder");
 	const img = el("img");
 	img.src = "static/team_" + key + ".png";
 	img.alt = name;
 	const who = el("div", "who");
-	who.append(el("b", "", name), el("small", "", role));
+	r.net = el("div", "net", "offline · di ruangannya");
+	who.append(el("b", "", name), el("small", "", role), r.net);
 	r.append(img, who);
-	r.onclick = () => { send("room", name); toGame(); };
+	r.onclick = () => { founderWhere[key] ? send("focus_founder", key) : send("room", name); toGame(); };
 	$("founders").append(r);
+	founderRows[key] = r;
+}
+function renderFounders(where) {
+	founderWhere = where || {};
+	let n = 0;
+	for (const [, , key] of FOUNDERS) {
+		const r = founderRows[key];
+		const on = key in founderWhere;
+		n += on ? 1 : 0;
+		const you = isFounder() && session.key === key;
+		const txt = on ? (you ? "kamu · " : "online · ") + founderWhere[key] : "offline · di ruangannya";
+		if (r.net.textContent !== txt) r.net.textContent = txt;
+		r.classList.toggle("online", on);
+	}
+	const info = n ? n + " online" : "Lantai 3";
+	if ($("net-info").textContent !== info) $("net-info").textContent = info;
 }
 
 // tombol lantai & tampilan
@@ -610,6 +635,7 @@ function applyAccount() {
 	document.querySelectorAll("#chips .chip").forEach((c) => c.style.opacity = isFounder() ? "" : "0.45");
 	document.querySelector('#floors button[data-f="2"]').classList.toggle("locked", !isFounder());
 	refreshMeet();
+	netTrack();
 }
 function openLogin() {
 	$("lg-err").textContent = "";
@@ -798,6 +824,120 @@ document.addEventListener("fullscreenchange", () => {
 	if (!document.fullscreenElement) document.body.classList.remove("immersive");
 });
 
+// ---------- multiplayer: founder online saling melihat (Supabase Realtime) ----------
+// Godot memanggil window.ovNetSend(json) saat karakter kita mulai jalan / detak 15 dtk.
+// Pesan pemain lain diteruskan ke Godot lewat ovCommand("net_state"); daftar online lewat "net_online".
+// Tanpa konfigurasi Supabase (/api/net-config kosong) dipakai BroadcastChannel: hanya antar-tab
+// di browser yang sama, berguna untuk tes lokal.
+const SUPABASE_JS = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
+window.ovNetSend = function (json) {
+	if (!isFounder()) return;
+	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "st", payload: { j: json } });
+	else if (net.bc) net.bc.postMessage({ t: "st", j: json });
+};
+function netSetOnline(keys) {
+	const list = [...new Set(keys)].filter((k) => FOUNDERS.some((f) => f[2] === k)).sort();
+	if (list.join() === net.online.join() && net.godot) return;
+	net.online = list;
+	if (window.ovCommand) {
+		net.godot = true;
+		send("net_online", list.join(","));
+	}
+}
+function netTrack() {
+	const want = isFounder() ? session.key : "";
+	if (want === net.tracked) return;
+	if (net.ch && net.ok) {
+		net.tracked = want;
+		if (want) net.ch.track({ key: want, name: session.name });
+		else net.ch.untrack();
+	} else if (net.bc) {
+		net.tracked = want;
+		net.bc.postMessage({ t: want ? "hi" : "bye", key: want || net.lastKey, id: net.id });
+		net.lastKey = want;
+	}
+}
+function loadScript(src) {
+	return new Promise((ok, fail) => {
+		const s = document.createElement("script");
+		s.src = src;
+		s.onload = ok;
+		s.onerror = () => fail(new Error("gagal memuat " + src));
+		document.head.append(s);
+	});
+}
+async function netStart() {
+	let cfg = {};
+	try { cfg = await (await fetch("/api/net-config", { cache: "no-store" })).json(); } catch (e) {}
+	if (cfg.url && cfg.key) {
+		try {
+			await loadScript(SUPABASE_JS);
+			const sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } });
+			const ch = sb.channel("growhaley-office", { config: { broadcast: { self: false }, presence: { key: net.id } } });
+			ch.on("broadcast", { event: "st" }, ({ payload }) => payload && payload.j && send("net_state", payload.j));
+			ch.on("broadcast", { event: "hello" }, () => send("net_sync"));
+			ch.on("presence", { event: "sync" }, () => {
+				const keys = [];
+				for (const metas of Object.values(ch.presenceState())) for (const m of metas) if (m.key) keys.push(m.key);
+				netSetOnline(keys);
+			});
+			ch.subscribe((status) => {
+				net.ok = status === "SUBSCRIBED";
+				if (net.ok) {
+					net.tracked = "";
+					netTrack();
+					if (net.godot) netHello();
+				}
+			});
+			net.ch = ch;
+			return;
+		} catch (e) {
+			console.warn("multiplayer: Supabase gagal, pakai mode lokal", e);
+		}
+	}
+	if (!("BroadcastChannel" in window)) return;
+	// mode lokal: "presence" tiruan dengan detak tiap 3 dtk
+	net.bc = new BroadcastChannel("growhaley-office");
+	net.bc.onmessage = ({ data: m }) => {
+		if (m.t === "st") send("net_state", m.j);
+		else if (m.t === "hello") {
+			send("net_sync");
+			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+		}
+		else if (m.t === "hi") {
+			const fresh = !net.seen[m.id];
+			net.seen[m.id] = { key: m.key, at: Date.now() };
+			if (fresh) {
+				send("net_sync");
+				if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+			}
+		} else if (m.t === "bye") delete net.seen[m.id];
+		netLocalOnline();
+	};
+	setInterval(() => {
+		if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, id: net.id });
+		netLocalOnline();
+	}, 3000);
+	addEventListener("pagehide", () => net.tracked && net.bc.postMessage({ t: "bye", id: net.id }));
+	net.tracked = "";
+	netTrack();
+}
+// minta posisi semua founder yang online (dipanggil setelah game siap menerima)
+function netHello() {
+	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "hello", payload: {} });
+	else if (net.bc) net.bc.postMessage({ t: "hello" });
+}
+function netLocalOnline() {
+	const now = Date.now();
+	const keys = [];
+	for (const [id, v] of Object.entries(net.seen)) {
+		if (now - v.at > 8000) delete net.seen[id];
+		else if (v.key) keys.push(v.key);
+	}
+	netSetOnline(keys);
+}
+netStart();
+
 // state dari Godot (dipanggil berkala)
 let lastFeedback = "";
 const rows = {};
@@ -827,6 +967,11 @@ window.ovUpdate = function (s) {
 	document.querySelectorAll("#floors button").forEach((b) => b.classList.toggle("on", b.dataset.x ? s.exterior : !s.exterior && Number(b.dataset.f) === s.floor));
 	document.querySelectorAll("#modes button").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === s.pixel));
 	syncFounder();
+	if (!net.godot) {
+		netSetOnline(net.online);
+		netHello();
+	}
+	renderFounders(s.founders);
 	onMeetRoom(s.meeting || "");
 	if (s.me_room) $("me-room").textContent = s.me_room;
 	if (!detailSynced) {

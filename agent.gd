@@ -3,6 +3,7 @@ extends Node3D
 ## Karakter chibi (kepala besar, badan mungil) yang mewakili satu AI agent.
 
 signal need_task(agent: Agent)
+signal move_started(agent: Agent)  # dipakai multiplayer: kirim rute ke pemain lain
 
 const FLOOR_H := 3.2
 const RIG_SCALE := 0.8
@@ -341,6 +342,50 @@ func begin_move(points: Array, kind: String, yaw: float, arrive_status: String) 
 	_arrive_yaw = yaw
 	_arrive_status = arrive_status
 	set_status("berjalan...")
+	move_started.emit(self)
+
+
+## Keadaan ringkas untuk multiplayer: posisi, sisa rute, cara tiba, duduk/berdiri.
+func net_state() -> Dictionary:
+	var r := func(v: float) -> float: return snappedf(v, 0.01)
+	var path := []
+	for p in _path:
+		path.append([r.call(p.x), r.call(p.y), r.call(p.z)])
+	return {"p": [r.call(position.x), r.call(position.y), r.call(position.z)], "path": path,
+		"kind": _arrive_kind, "ayaw": r.call(_arrive_yaw), "ast": _arrive_status,
+		"yaw": r.call(_face_yaw), "sit": sitting, "st": status}
+
+
+## Terapkan keadaan dari pemain lain. Selisih kecil diperhalus (jalan), selisih besar langsung lompat.
+func apply_net_state(s: Dictionary) -> void:
+	var p: Array = s.get("p", [])
+	if p.size() != 3:
+		return
+	var at := Vector3(p[0], p[1], p[2])
+	var path := []
+	for q in s.get("path", []):
+		path.append(Vector3(q[0], q[1], q[2]))
+	if position.distance_to(at) > 2.5:
+		position = at
+	elif path.is_empty() and position.distance_to(at) > 0.15:
+		path.append(at)  # diam di tempat lain: jalan pelan ke sana
+	think = 1e9
+	if not path.is_empty():
+		_path = path
+		_arrive_kind = str(s.get("kind", "stand"))
+		_arrive_yaw = float(s.get("ayaw", 0.0))
+		_arrive_status = str(s.get("ast", ""))
+		stand_up()
+		set_status("berjalan...")
+		return
+	_path.clear()
+	_face_yaw = float(s.get("yaw", _face_yaw))
+	if bool(s.get("sit", false)) != sitting:
+		if s.get("sit", false):
+			_sit_down()
+		else:
+			stand_up()
+	set_status(str(s.get("st", status)))
 
 
 func stop() -> void:
