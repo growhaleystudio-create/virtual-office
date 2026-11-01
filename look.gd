@@ -58,18 +58,28 @@ shader_type canvas_item;
 uniform float levels = 40.0;
 // renderer web (Compatibility) lebih kontras & terang; kurva ini menyamakan dengan desktop
 uniform bool compat_fix = false;
+// mode HD: tanpa dithering/kuantisasi warna (gambar bersih)
+uniform bool retro = true;
 const float B[16] = float[](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
 
 void fragment() {
 	vec4 c = texture(TEXTURE, UV);
 	if (compat_fix) {
-		c.rgb = clamp(-0.178 * c.rgb * c.rgb + 1.012 * c.rgb + 0.08, 0.0, 1.0);
+		c.rgb = clamp(-0.178 * c.rgb * c.rgb + 1.012 * c.rgb + (retro ? 0.08 : 0.03), 0.0, 1.0);
 	}
-	ivec2 p = ivec2(floor(UV / TEXTURE_PIXEL_SIZE));
-	float d = B[(p.y % 4) * 4 + (p.x % 4)] / 16.0 - 0.5;
-	c.rgb = floor(c.rgb * levels + d + 0.5) / levels;
+	if (!retro) {
+		// mode HD: warna sedikit lebih hidup & kontras supaya tidak pudar
+		float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+		c.rgb = mix(vec3(l), c.rgb, 1.18);
+		c.rgb = clamp((c.rgb - 0.5) * 1.08 + 0.5, 0.0, 1.0);
+	}
+	if (retro) {
+		ivec2 p = ivec2(floor(UV / TEXTURE_PIXEL_SIZE));
+		float d = B[(p.y % 4) * 4 + (p.x % 4)] / 16.0 - 0.5;
+		c.rgb = floor(c.rgb * levels + d + 0.5) / levels;
+	}
 	float v = distance(UV, vec2(0.5));
-	c.rgb *= 1.0 - smoothstep(0.55, 0.85, v) * 0.35;
+	c.rgb *= 1.0 - smoothstep(0.55, 0.85, v) * (retro ? 0.35 : 0.18);
 	COLOR = c;
 }
 """
@@ -159,6 +169,13 @@ static func _collect(n: Node3D, xf0: Transform3D, flatten: bool, groups: Diction
 				_collect(c, xf0 * c.transform, true, groups, victims)
 			else:
 				batch(c)
+
+
+## Ukuran grid "getar" PS1 pada karakter mengikuti resolusi render.
+static func set_snap_res(res: Vector2) -> void:
+	for m in _mats.values():
+		if m is ShaderMaterial:
+			m.set_shader_parameter("snap_res", res)
 
 
 static func post_material() -> ShaderMaterial:

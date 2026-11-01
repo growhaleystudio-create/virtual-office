@@ -126,6 +126,7 @@ func _ready() -> void:
 	_build_bridge()
 	set_view_floor(0)
 	rng.randomize()
+	_apply_pixel_mode()
 	_maybe_screenshot()
 
 
@@ -194,6 +195,7 @@ func _build_render() -> void:
 	layer.layer = -1
 	add_child(layer)
 	var screen := TextureRect.new()
+	_screen = screen
 	screen.texture = svp.get_texture()
 	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 	screen.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -203,22 +205,47 @@ func _build_render() -> void:
 	screen.material = Look.post_material()
 	screen.material.set_shader_parameter("compat_fix", RenderingServer.get_current_rendering_method() == "gl_compatibility")
 	layer.add_child(screen)
+	# web: default HD (layar browser besar); desktop: retro sedang
+	_pix_i = 2 if OS.has_feature("web") else 1
+	get_window().size_changed.connect(_on_window_resized)
 
 
 ## Resolusi gambar 3D (jumlah baris piksel). Makin kecil = makin retro/kotak-kotak.
-const PIXEL_LINES := [240, 360, 540]
+## 0 = HD: resolusi penuh layar, tepi halus (MSAA), tanpa dithering.
+const PIXEL_LINES := [240, 360, 0]
+const PIXEL_NAMES := ["Retro", "Sedang", "HD"]
 var _pix_i := 1
+var _screen: TextureRect
 
 
 func _svp_size() -> Vector2i:
 	var lines: int = PIXEL_LINES[_pix_i]
+	if lines == 0:
+		# area kanvas 1280x720 dalam piksel jendela sebenarnya (stretch "keep")
+		var ws := Vector2(get_window().size)
+		var k := minf(ws.x / 1280.0, ws.y / 720.0)
+		return Vector2i(maxi(64, roundi(1280.0 * k)), maxi(36, roundi(720.0 * k)))
 	return Vector2i(roundi(lines * 16.0 / 9.0), lines)
+
+
+func _apply_pixel_mode() -> void:
+	var hd: bool = PIXEL_LINES[_pix_i] == 0
+	svp.size = _svp_size()
+	svp.msaa_3d = Viewport.MSAA_2X if hd else Viewport.MSAA_DISABLED
+	_screen.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR if hd else CanvasItem.TEXTURE_FILTER_NEAREST
+	_screen.material.set_shader_parameter("retro", not hd)
+	Look.set_snap_res(Vector2(svp.size) if not hd else Vector2(1280, 720))
+
+
+func _on_window_resized() -> void:
+	if PIXEL_LINES[_pix_i] == 0:
+		svp.size = _svp_size()
 
 
 func cycle_pixel_detail() -> void:
 	_pix_i = (_pix_i + 1) % PIXEL_LINES.size()
-	svp.size = _svp_size()
-	show_feedback("Detail piksel: %s (%d baris)" % [["retro", "sedang", "halus"][_pix_i], PIXEL_LINES[_pix_i]])
+	_apply_pixel_mode()
+	show_feedback("Tampilan: %s" % PIXEL_NAMES[_pix_i])
 
 
 ## Posisi layar (kanvas 1280x720) -> piksel di SubViewport 3D.
@@ -2059,7 +2086,7 @@ func _build_ui() -> void:
 	cl.add_child(ui)
 
 	var help := Label.new()
-	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3 atau PgUp/PgDn: lantai  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: detail piksel  ·  Enter: perintah"
+	help.text = "Klik kiri: pilih/jalan  ·  Tahan kiri + geser: putar  ·  Tahan kanan + geser: geser  ·  Scroll: zoom  ·  1/2/3 atau PgUp/PgDn: lantai  ·  Q/E: putar  ·  F: ikuti  ·  H: panel tim  ·  P: tampilan Retro/HD  ·  Enter: perintah"
 	help.add_theme_font_size_override("font_size", 12)
 	help.position = Vector2(12, 6)
 	ui.add_child(help)
