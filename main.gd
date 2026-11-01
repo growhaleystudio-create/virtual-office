@@ -1415,6 +1415,7 @@ func set_founder(key: String) -> void:
 			_send_home(me_key)
 	me = founder_npcs.get(key)
 	me_key = key if me else ""
+	_on_stairs = false
 	web_guest = me == null and OS.has_feature("web")
 	_my_grid2 = null
 	if me == null:
@@ -2884,6 +2885,7 @@ func _maybe_screenshot() -> void:
 			elif c.begins_with("tp "):
 				var tp := c.split(" ")
 				me.position = Vector3(float(tp[1]), int(tp[3]) * FH, float(tp[2]))
+				me.stop()
 				me.stand_up()
 				follow = me
 			elif c.begins_with("gridat "):
@@ -3083,6 +3085,7 @@ func _update_bubbles() -> void:
 const WALK_SPEED := 3.2
 const WALK_R := 0.22  # "badan" karakter: jarak minimal ke sel padat
 var _walk_keys := false
+var _on_stairs := false  # sedang naik/turun tangga hasil WASD: input diabaikan sampai tiba
 var _pad := Vector2.ZERO  # tombol panah di layar HP (dari halaman web, cmd "move")
 var _walk_net := 0.0
 
@@ -3102,9 +3105,13 @@ func _walkable(p: Vector3, f: int) -> bool:
 
 
 func _me_walk(v: Vector2, d: float) -> void:
+	if _on_stairs:
+		if me.is_moving():
+			return  # biarkan naik/turun tangga selesai (tombol yang masih ditahan tidak membatalkannya)
+		_on_stairs = false
 	var frac := fposmod(me.position.y, FH)
 	if frac > 0.05 and frac < FH - 0.05:
-		return  # sedang naik/turun tangga: biarkan selesai
+		return  # sedang di tengah tangga (mis. hasil klik): biarkan selesai
 	var f := me.floor_index()
 	var dir := Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw)
 	# langkah dipecah kecil (<= 0.04 dtk) supaya frame lambat tidak menembus dinding
@@ -3137,23 +3144,25 @@ func _try_stairs(dir: Vector3, f: int) -> bool:
 		var lo_e: Vector3 = ln["lo_end"]
 		var hi_e: Vector3 = ln["hi_end"]
 		var up_dir := Vector2(hi_e.x - lo_e.x, hi_e.z - lo_e.z).normalized()
-		var here: Vector3
+		var land: Vector2i
 		var want: Vector2
 		var path: Array
 		if f == lo:
-			here = lo_e
+			land = ln["lo_cell"]
 			want = up_dir
 			path = [lo_e, hi_e, cell_to_world(ln["hi_cell"], lo + 1)]
 		elif f == lo + 1:
-			here = hi_e
+			land = ln["hi_cell"]
 			want = -up_dir
 			path = [hi_e, lo_e, cell_to_world(ln["lo_cell"], lo)]
 		else:
 			continue
-		# dekat ujung tangga DAN berjalan searah anak tangga (bukan sekadar lewat di koridor)
-		var dist := Vector2(here.x - me.position.x, here.z - me.position.z).length()
-		if dist < 1.1 and want.dot(Vector2(dir.x, dir.z)) > 0.6:
+		# berdiri di petak depan tangga (anak tangga selebar 2 petak) DAN berjalan searah anak tangga
+		var c := world_to_cell(me.position)
+		if (c == land or c == land + Vector2i(0, 1)) and want.dot(Vector2(dir.x, dir.z)) > 0.6:
 			me.begin_move(path, "stand", me.rotation.y, "diam")
+			_on_stairs = true
+			follow = me
 			return true
 	return false
 
@@ -3212,6 +3221,7 @@ func set_guest(json: String) -> void:
 		name_ = "Tamu"
 	me = _make_guest(name_, "g:" + str(m["id"]))
 	me_key = "g:" + str(m["id"])
+	_on_stairs = false
 	me_is_guest = true
 	me.plumbob = Agent.make_plumbob(me, 0.42, Color(1.0, 0.82, 0.25))
 	me.plumbob.position.y = 2.35

@@ -415,7 +415,7 @@ $GODOT_HEAD_INCLUDE
 		<button id="t-right" class="on" title="Tampilkan / sembunyikan panel kanan">Panel Kontrol</button>
 		<button id="t-focus" title="Sembunyikan semua panel, frame jadi besar">Layar Lebar</button>
 	</div>
-	<div class="live"><span class="dot"></span><span id="mode">Memuat kantor...</span></div>
+	<div class="live"></div>
 	<button class="acct" id="guest-btn" title="Punya karakter sendiri sebagai tamu">Masuk Tamu</button>
 	<button class="acct" id="acct">Masuk Founder</button>
 </header>
@@ -585,13 +585,7 @@ $GODOT_HEAD_INCLUDE
 		</div>
 		<div class="card about">
 			<h3>Tentang</h3>
-			<p>Kantor virtual tim Growhaley, digital growth partner.</p>
-			<ul class="about-list">
-				<li><b>Sales</b> adalah karyawan AI yang terhubung ke bot Sales Sawit (cari lead, analisa, draft WA). Statusnya nyata.</li>
-				<li>Karyawan lain (Marketing, Admin, Support, Finance, Developer) <b>untuk sementara masih NPC</b> yang bergerak otomatis. Nanti menyusul jadi AI.</li>
-				<li><b>Founder</b> masuk dengan akun, bisa ke semua lantai, memberi perintah, chat &amp; video meeting.</li>
-				<li><b>Tamu</b> bisa punya karakter (Masuk Tamu) dan menjelajah Lantai 1.</li>
-			</ul>
+			<p>Kantor virtual tim Growhaley, digital growth partner. Tempat tim bekerja, ngobrol, dan meeting bersama secara online.</p>
 			<a href="https://growhaley.com" target="_blank" rel="noopener">growhaley.com →</a>
 		</div>
 	</aside>
@@ -1243,7 +1237,6 @@ let lastFeedback = "";
 const rows = {};
 window.ovUpdate = function (s) {
 	window.ovLast = s;
-	$("mode").textContent = s.online;
 	$("team-count").textContent = s.agents.length + " orang";
 	// baris dibuat sekali lalu hanya teksnya yang diperbarui (supaya klik tidak hilang)
 	const team = $("team");
