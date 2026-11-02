@@ -1124,16 +1124,18 @@ $("pa-form").onsubmit = async (e) => {
 		const { id } = await salesApi({ text, bot: "pa" });
 		pa.pending[id] = setTimeout(() => {
 			delete pa.pending[id];
-			paLog("Onel", "(tidak ada balasan, cek langsung di Telegram)", "me");
+			paLog("Onel", "(belum ada balasan, cek langsung di Telegram)", "me");
 		}, 200000);
 	} catch (err) {
 		paLog("Onel", "(gagal mengirim: " + err.message + ")", "me");
 	}
 };
 async function paOnReply(p) {
-	if (!p || !pa.pending[p.id]) return;
-	clearTimeout(pa.pending[p.id]);
-	delete pa.pending[p.id];
+	if (!p) return;
+	if (pa.pending[p.id]) {
+		clearTimeout(pa.pending[p.id]);
+		delete pa.pending[p.id];
+	} else if (!(p.late && paCan())) return;  // balasan terlambat: dibuka hanya bila memang untuk kita
 	try {
 		const d = await salesApi({ open: p.box, bot: "pa" });
 		paLog("Onel", d.reply);
