@@ -498,8 +498,23 @@ func _start_floor(f: int) -> void:
 
 # ---------- perabot ----------
 
-func _add_spot(place: String, cell: Vector2i, kind: String, yaw_: float, approach := NONE, shift := 0.2) -> void:
-	var s := {"cell": cell, "floor": cf, "kind": kind, "yaw": yaw_, "approach": approach, "shift": shift}
+## Aktivitas karakter di tiap jenis tempat (lihat Agent.activity).
+func _act_for(place: String, kind: String) -> String:
+	match place:
+		"desk", "meeting", "rapat_atas", "kerja":
+			return "type" if kind == "sit" else ""
+		"lounge", "lobby", "teras", "bos", "santai":
+			return "relax" if kind == "sit" else ""
+		"perpus":
+			return "read"
+		"pantry":
+			return "coffee"
+	return ""
+
+
+func _add_spot(place: String, cell: Vector2i, kind: String, yaw_: float, approach := NONE, shift := 0.2, act := "") -> void:
+	var s := {"cell": cell, "floor": cf, "kind": kind, "yaw": yaw_, "approach": approach, "shift": shift,
+		"act": act if act != "" else _act_for(place, kind)}
 	if place == "desk":
 		desk_spots.append(s)
 	else:
@@ -956,6 +971,7 @@ func _build_lobby() -> void:
 	_box(Vector3(rc.x + 1.5, 1.3, rc.z + 0.1), Vector3(0.5, 0.35, 0.05), Color(0.2, 0.35, 0.5))
 	_box(Vector3(rc.x - 1.5, 1.1, rc.z), Vector3(0.18, 0.1, 0.18), Color(0.95, 0.8, 0.25))
 	_chair(Vector2i(5, 26), PI, Color(0.3, 0.3, 0.35))
+	_add_spot("_extra", Vector2i(5, 26), "sit", PI, NONE, 0.2, "type")
 	_rug(2.5, 20, 7, 4, BRAND_PINK, true)
 	for x in range(4, 8):
 		_add_spot("lobby", Vector2i(x, 22), "stand", 0.0)
@@ -1573,8 +1589,8 @@ func _build_floor2() -> void:
 	_hwall(0, 27, 11, [[6, 7], [20, 21]], true)
 	_vwall(14, 0, 6, [], true)
 	_vwall(14, 12, 17, [], true)
-	_vwall(28, 0, 6, [], true)
-	_vwall(28, 12, 17, [], true)
+	_vwall(28, 0, 7, [], true)  # sampai z=7 supaya sudut ruang Dianita menyatu
+	_vwall(28, 11, 17, [], true)  # mulai z=11 supaya sudut ruang Ahay menyatu
 	_vwall(36, 0, 17, [[3, 4], [12, 13]], true)
 	_hwall(37, 43, 8, [], true)
 
@@ -1588,6 +1604,8 @@ func _build_floor2() -> void:
 	# hall tengah: sofa tunggu, tanaman, logo
 	_solid(30, 14, 1, 3)
 	_sofa(_rect_center(30, 14, 1, 3), 3.0, PI / 2, BRAND_PINK)
+	for z in range(14, 17):
+		_add_spot("_extra", Vector2i(30, z), "sit", PI / 2, Vector2i(31, z), 0.0, "relax")
 	_solid(32, 15, 2, 1)
 	var tc := _rect_center(32, 15, 2, 1)
 	_box(Vector3(tc.x, 0.35, tc.z), Vector3(1.6, 0.08, 0.8), Color(0.95, 0.95, 0.96), "stone")
@@ -1682,6 +1700,7 @@ func _founder_room(info: Array, r: Rect2i, door: Vector2i) -> void:
 	# kursi tamu
 	for v: int in [-1, 1]:
 		_chair(cell.call(3, v), yaw_ + PI, acc.darkened(0.15))
+		_add_spot("_extra", cell.call(3, v), "sit", yaw_ + PI, NONE, 0.2, "relax")
 	# tanaman & lemari di sudut belakang
 	var half := (r.size.y if door.x != 0 else r.size.x) / 2
 	var pa: Vector2i = cell.call(0, -half + 1)
@@ -1842,7 +1861,7 @@ func _build_agents() -> void:
 		fa.dest_floor = 2
 		fa.think = 1e9
 		add_child(fa)
-		fa.begin_move([fa.position], "sit", y_, "di ruangan")
+		fa.begin_move([fa.position], "sit", y_, "di ruangan", "type")
 		fa.move_started.connect(_on_founder_move)
 		founder_npcs[info[2]] = fa
 		i += 1
@@ -1927,7 +1946,7 @@ func send(a: Agent, spot: Dictionary, arrive_status: String) -> bool:
 			pts[pts.size() - 1] = p
 	a.dest_cell = spot["cell"]
 	a.dest_floor = tf
-	a.begin_move(pts, spot["kind"], yaw_, arrive_status)
+	a.begin_move(pts, spot["kind"], yaw_, arrive_status, spot.get("act", ""))
 	return true
 
 
@@ -2809,6 +2828,7 @@ func _process(d: float) -> void:
 		elif _walk_keys:
 			_walk_keys = false
 			_net_send()  # berhenti: kirim posisi akhir
+		_auto_interact(d)
 	if v != Vector2.ZERO:
 		follow = null
 		t_pivot += Vector3(v.x, 0, v.y).normalized().rotated(Vector3.UP, t_yaw) * t_zoom * 0.8 * d
@@ -2911,6 +2931,31 @@ func _maybe_screenshot() -> void:
 					gg = gn[0]
 					gn = gn.substr(2)
 				set_guest(JSON.stringify({"id": "test1234", "name": gn, "g": gg}))
+			elif c.begins_with("near "):
+				# taruh karakter sendiri ~0.7 dari tempat <place> nomor <i> (tes aktivitas otomatis)
+				var na := c.split(" ")
+				var sp: Dictionary = (desk_spots if na[1] == "desk" else places[na[1]])[int(na[2]) if na.size() > 2 else 0]
+				var base := cell_to_world(sp["approach"], sp["floor"]) if sp["approach"] != NONE else _spot_pos(sp)
+				var off := Vector3(sin(sp["yaw"]), 0, cos(sp["yaw"])) * 0.7
+				me.stop()
+				me.stand_up()
+				me.position = base + (off if sp["kind"] == "stand" else Vector3.ZERO) + Vector3(0.3, 0, 0.3)
+				_skip_spot = {}
+				follow = me
+				var tgt := _spot_pos(sp)
+				t_pivot = Vector3(tgt.x, sp["floor"] * FH, tgt.z)
+				pivot.position = t_pivot
+			elif c == "act":
+				print("me act=", me.activity, " sit=", me.sitting, " status=", me.status)
+			elif c == "wallgaps":
+				# sudut dinding yang hanya bersentuhan diagonal (tidak menyatu)
+				for wf in _wall_cells.size():
+					for wc: Vector2i in _wall_cells[wf]:
+						for dx: int in [-1, 1]:
+							var dg := wc + Vector2i(dx, 1)
+							if _wall_cells[wf].has(dg) and not _wall_cells[wf].has(Vector2i(dg.x, wc.y)) and not _wall_cells[wf].has(Vector2i(wc.x, dg.y)):
+								print("celah sudut lantai %d: %s - %s" % [wf, wc, dg])
+				print("wallgaps selesai")
 			elif c.begins_with("where"):
 				print("me:", me.position if me else "-", " room:", room_of(me) if me else "-", " status:", me.status if me else "-")
 			elif c.begins_with("chat "):
@@ -3021,7 +3066,7 @@ func _send_home(k: String) -> void:
 		var fa: Agent = founder_npcs[k]
 		var y_: float = seat["yaw"]
 		fa.position = cell_to_world(seat["cell"], 2) + Vector3(sin(y_), 0, cos(y_)) * 0.2
-		fa.begin_move([fa.position], "sit", y_, "di ruangan")
+		fa.begin_move([fa.position], "sit", y_, "di ruangan", "type")
 
 
 # ---------- balon chat di atas kepala ----------
@@ -3097,6 +3142,10 @@ func _update_bubbles() -> void:
 const WALK_SPEED := 3.2
 const WALK_R := 0.22  # "badan" karakter: jarak minimal ke sel padat
 var _walk_keys := false
+var _idle_t := 0.0  # berapa lama karakter sendiri diam (untuk duduk / beraktivitas otomatis)
+var _skip_spot := {}  # tempat yang baru ditinggalkan: jangan langsung duduk lagi di situ
+
+const ACT_STATUS := {"type": "mengetik", "relax": "santai", "read": "membaca buku", "coffee": "bikin kopi"}
 var _on_stairs := false  # sedang naik/turun tangga hasil WASD: input diabaikan sampai tiba
 var _pad := Vector2.ZERO  # tombol panah di layar HP (dari halaman web, cmd "move")
 var _walk_net := 0.0
@@ -3265,3 +3314,91 @@ func _clear_guest() -> void:
 	me_is_guest = false
 	follow = null
 	select(agents[0])
+
+
+# ---------- aktivitas otomatis karakter sendiri ----------
+
+## Posisi akhir karakter di suatu tempat (sama dengan perhitungan send()).
+func _spot_pos(spot: Dictionary) -> Vector3:
+	var p := cell_to_world(spot["cell"], spot["floor"])
+	if spot["kind"] == "sit":
+		var y_: float = spot["yaw"]
+		p += Vector3(sin(y_), 0, cos(y_)) * float(spot["shift"])
+	return p
+
+
+func _all_spots() -> Array:
+	var out: Array = desk_spots.duplicate()
+	for place in places:
+		out.append_array(places[place])
+	for key in founder_seats:
+		var fs: Dictionary = founder_seats[key]
+		out.append({"cell": fs["cell"], "floor": 2, "kind": "sit", "yaw": fs["yaw"], "approach": NONE, "shift": 0.2, "act": "type"})
+	return out
+
+
+func _spot_taken(spot: Dictionary, p: Vector3) -> bool:
+	var others: Array = []
+	others.append_array(agents)
+	others.append_array(founder_npcs.values())
+	others.append_array(guest_npcs.values())
+	for o: Agent in others:
+		if o == me or not is_instance_valid(o):
+			continue
+		if o.position.distance_to(p) < 0.45:
+			return true
+		if o.is_moving() and o.dest_floor == spot["floor"] and o.dest_cell == spot["cell"]:
+			return true
+	return false
+
+
+## Mendekati kursi/sofa/meja/rak buku/pantry lalu berhenti -> langsung duduk mengetik, santai,
+## pegang buku, atau bikin kopi. Bergerak lagi = berdiri. Tempat yang baru ditinggalkan dilewati
+## sampai karakter menjauh, supaya tidak terus "tersedot" duduk lagi.
+func _auto_interact(d: float) -> void:
+	if me == null or _on_stairs:
+		return
+	if not _skip_spot.is_empty() and me.position.distance_to(_skip_spot["pos"]) > 1.4:
+		_skip_spot = {}
+	if me.is_moving() or me._manual > 0.0 or me.activity != "" or me.sitting:
+		_idle_t = 0.0
+		return
+	if fposmod(me.position.y, FH) > 0.05 and fposmod(me.position.y, FH) < FH - 0.05:
+		return
+	_idle_t += d
+	if _idle_t < 0.25:
+		return
+	_idle_t = -1e9  # sekali per berhenti
+	var f := me.floor_index()
+	var best := {}
+	var best_d := 1.0
+	for spot in _all_spots():
+		if spot["floor"] != f:
+			continue
+		var p := _spot_pos(spot)
+		var dist := Vector2(me.position.x - p.x, me.position.z - p.z).length()
+		if spot["approach"] != NONE:
+			var ap := cell_to_world(spot["approach"], f)
+			dist = minf(dist, Vector2(me.position.x - ap.x, me.position.z - ap.z).length() + 0.2)
+		if dist < best_d and not _spot_taken(spot, p):
+			if not _skip_spot.is_empty() and _skip_spot["pos"].distance_to(p) < 0.1:
+				continue
+			best_d = dist
+			best = spot
+	if best.is_empty():
+		return
+	var p := _spot_pos(best)
+	var path := []
+	if best["approach"] != NONE:
+		var ap := cell_to_world(best["approach"], f)
+		if me.position.distance_to(ap) > 0.15 and me.position.distance_to(p) > 0.6:
+			path.append(ap)
+	path.append(p)
+	var act: String = best.get("act", "")
+	if act == "" and best["kind"] == "sit":
+		act = "type"
+	me.dest_cell = best["cell"]
+	me.dest_floor = f
+	me.begin_move(path, best["kind"], best["yaw"], ACT_STATUS.get(act, "diam"), act)
+	_skip_spot = {"pos": p}  # setelah berdiri nanti, tempat ini dilewati sampai menjauh
+	_net_send()

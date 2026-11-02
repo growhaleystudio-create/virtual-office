@@ -23,7 +23,13 @@ var shirt_color := Color.WHITE
 var title := ""  # jabatan (tampil saat di-hover)
 var hovered := false
 var plumbob: Node3D
-var relaxed := false  # duduk santai (tangan di pangkuan), bukan mengetik
+## Aktivitas saat diam di suatu tempat: "type" (mengetik), "relax" (santai di sofa),
+## "read" (pegang buku), "coffee" (bikin / minum kopi), "" (berdiri biasa).
+var activity := ""
+var _arrive_act := ""
+var relaxed := false  # NPC kota: kalau duduk selalu santai, bukan mengetik
+var _book: Node3D
+var _mug: Node3D
 
 var _path: Array = []
 var _arrive_kind := "stand"
@@ -172,6 +178,26 @@ func setup(p_name: String, shirt: Color, hair: Color, look := -1) -> void:
 	_arm_r = _limb(Vector3(0.36, 1.32, 0), 0.1, 0.42, shirt)
 	for arm in [_arm_l, _arm_r]:
 		make_ball(arm, Vector3(0, -0.46, 0), 0.11, skin)
+	# properti aktivitas (disembunyikan sampai dipakai)
+	_book = Node3D.new()
+	_book.position = Vector3(0, 1.2, 0.47)
+	_book.rotation.x = -0.75
+	_rig.add_child(_book)
+	var cover: Color = [Color(0.75, 0.25, 0.22), Color(0.22, 0.42, 0.70), Color(0.30, 0.55, 0.32)][_count % 3]
+	for sx in [-1.0, 1.0]:
+		var half := make_box(_book, Vector3(0.15 * sx, 0, 0), Vector3(0.3, 0.38, 0.03), cover, "cloth", 2.0)
+		half.rotation.y = -0.25 * sx
+		var pg := make_box(_book, Vector3(0.14 * sx, 0, 0.025), Vector3(0.26, 0.34, 0.025), Color(0.97, 0.95, 0.88), "grain")
+		pg.rotation.y = -0.25 * sx
+	_book.visible = false
+	_mug = Node3D.new()
+	_mug.position = Vector3(0, -0.52, 0.1)
+	_arm_r.add_child(_mug)
+	make_cyl(_mug, Vector3.ZERO, 0.08, 0.16, Color(0.97, 0.97, 0.96), "grain", 10)
+	make_cyl(_mug, Vector3(0, 0.075, 0), 0.065, 0.02, Color(0.35, 0.20, 0.12), "grain", 10)
+	var handle := make_box(_mug, Vector3(0.1, 0, 0), Vector3(0.04, 0.09, 0.03), Color(0.97, 0.97, 0.96))
+	handle.rotation.z = 0.2
+	_mug.visible = false
 
 	_ring = MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
@@ -359,8 +385,10 @@ func is_moving() -> bool:
 	return not _path.is_empty()
 
 
-func begin_move(points: Array, kind: String, yaw: float, arrive_status: String) -> void:
+func begin_move(points: Array, kind: String, yaw: float, arrive_status: String, act := "") -> void:
 	stand_up()
+	activity = ""
+	_arrive_act = act
 	_path = points
 	_arrive_kind = kind
 	_arrive_yaw = yaw
@@ -377,7 +405,7 @@ func net_state() -> Dictionary:
 		path.append([r.call(p.x), r.call(p.y), r.call(p.z)])
 	return {"p": [r.call(position.x), r.call(position.y), r.call(position.z)], "path": path,
 		"kind": _arrive_kind, "ayaw": r.call(_arrive_yaw), "ast": _arrive_status,
-		"yaw": r.call(_face_yaw), "sit": sitting, "st": status}
+		"yaw": r.call(_face_yaw), "sit": sitting, "st": status, "act": activity, "aact": _arrive_act}
 
 
 ## Terapkan keadaan dari pemain lain. Selisih kecil diperhalus (jalan), selisih besar langsung lompat.
@@ -399,6 +427,8 @@ func apply_net_state(s: Dictionary) -> void:
 		_arrive_kind = str(s.get("kind", "stand"))
 		_arrive_yaw = float(s.get("ayaw", 0.0))
 		_arrive_status = str(s.get("ast", ""))
+		_arrive_act = str(s.get("aact", ""))
+		activity = ""
 		stand_up()
 		set_status("berjalan...")
 		return
@@ -409,6 +439,7 @@ func apply_net_state(s: Dictionary) -> void:
 			_sit_down()
 		else:
 			stand_up()
+	activity = str(s.get("act", ""))
 	set_status(str(s.get("st", status)))
 
 
@@ -421,6 +452,8 @@ func step_manual(dir: Vector3) -> void:
 	if _manual <= 0.0:
 		set_status("berjalan...")
 	_manual = 0.12
+	activity = ""
+	_arrive_act = ""
 	_arrive_kind = "stand"  # pemain lain: jangan duduk saat tiba di posisi ini
 	_arrive_status = "diam"
 	_face_yaw = atan2(dir.x, dir.z)
@@ -434,6 +467,7 @@ func stop() -> void:
 
 func stand_up() -> void:
 	sitting = false
+	activity = ""
 	_rig.position.y = 0.0
 
 
@@ -446,6 +480,7 @@ func _arrive() -> void:
 	_face_yaw = _arrive_yaw
 	if _arrive_kind == "sit":
 		_sit_down()
+	activity = _arrive_act if _arrive_act != "" else (("relax" if relaxed else "type") if _arrive_kind == "sit" else "")
 	set_status(_arrive_status)
 	think = randf_range(6.0, 10.0)
 
@@ -486,6 +521,8 @@ func _process(d: float) -> void:
 	var arm_l := 0.0
 	var arm_r := 0.0
 	var bob := 0.0
+	var head_x := 0.0
+	var act := "" if walking else activity
 	if walking:
 		var s := sin(_phase) * 0.7
 		leg_l = s
@@ -496,14 +533,34 @@ func _process(d: float) -> void:
 	elif sitting:
 		leg_l = -PI / 2
 		leg_r = -PI / 2
-		if relaxed:
+		if act == "relax":
 			arm_l = -0.5 + sin(_t * 1.3) * 0.05
 			arm_r = -0.5 + sin(_t * 1.1 + 1.0) * 0.05
+			bob = sin(_t * 1.6) * 0.01
+		elif act == "read" or act == "coffee":
+			pass  # diatur di bawah
 		else:
 			arm_l = -1.0 + sin(_t * 14.0) * 0.1
 			arm_r = -1.0 + sin(_t * 14.0 + 1.5) * 0.1
 	else:
 		bob = sin(_t * 2.2) * 0.012  # bernapas
+	if act == "read":
+		# pegang buku di depan dada, kepala menunduk, sesekali membalik halaman
+		var flip := maxf(0.0, sin(_t * 0.8)) ** 12
+		arm_l = -1.2 + sin(_t * 0.9) * 0.03
+		arm_r = -1.2 - flip * 0.5
+		head_x = 0.28
+	elif act == "coffee":
+		# tangan kiri di meja, kanan mengaduk lalu sesekali menyeruput
+		var cyc := fmod(_t, 7.0)
+		arm_l = -0.75
+		if cyc < 5.0:
+			arm_r = -0.95 + sin(_t * 9.0) * 0.08
+		else:
+			arm_r = -2.3 + sin((cyc - 5.0) * PI / 2.0) * 0.15
+			head_x = -0.12
+	_book.visible = act == "read"
+	_mug.visible = act == "coffee"
 	var k := minf(1.0, 15.0 * d)
 	_leg_l.rotation.x = lerpf(_leg_l.rotation.x, leg_l, k)
 	_leg_r.rotation.x = lerpf(_leg_r.rotation.x, leg_r, k)
@@ -511,6 +568,7 @@ func _process(d: float) -> void:
 	_arm_r.rotation.x = lerpf(_arm_r.rotation.x, arm_r, k)
 	_rig.position.y = (SIT_DROP if sitting else 0.0) + bob
 	_head.rotation.z = sin(_phase * 0.5) * 0.06 if walking else 0.0
+	_head.rotation.x = lerpf(_head.rotation.x, head_x, k)
 	_update_poke(d)
 
 	if plumbob:
