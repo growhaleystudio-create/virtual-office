@@ -279,6 +279,18 @@ body.pa-copy #pa-brief { display: flex; }
 #pa-brief .main { flex: 1 1 100%; background: #DA457F; border-color: #DA457F; color: #fff; }
 #pa-brief .step { display: none; flex: 1 1 40%; }
 body.brief-open #pa-brief .step { display: block; }
+/* Log Tamu */
+#visits { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+#visits .empty, #visits-stats { color: var(--muted); font-size: 12px; line-height: 1.5; }
+#visits-stats { margin: -2px 0 8px; }
+.visit { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 5px 6px; border-radius: 6px; }
+.visit:nth-child(odd) { background: var(--panel2); }
+.visit .who { flex: 1; min-width: 0; }
+.visit .who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.visit small { color: var(--muted); }
+.visit .tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--ink); color: var(--muted); flex: none; }
+.visit .tag.live { background: #3fbf6f; color: #fff; }
+#visits-refresh { flex: none; font-size: 12px; padding: 0 8px; line-height: 18px; letter-spacing: 0; }
 /* Hasil Kerja */
 #files { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
 #files .empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -289,7 +301,7 @@ body.brief-open #pa-brief .step { display: block; }
 .file .meta small { color: var(--muted); font-size: 11px; }
 .file button, .file a { font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--text); cursor: pointer; text-decoration: none; flex: none; }
 .file.new { border-color: var(--blue); }
-#files-refresh { float: right; font-size: 11px; padding: 2px 8px; }
+#files-refresh { flex: none; font-size: 12px; padding: 0 8px; line-height: 18px; letter-spacing: 0; }
 #doc .sheet { width: min(900px, 100%); height: min(88vh, 100%); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 #doc .bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 #doc .bar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -530,6 +542,11 @@ body.in-call #call { display: flex; }
 			<h3>Founder <span id="net-info">Lantai 3</span></h3>
 			<div id="founders"></div>
 		</div>
+		<div class="card founder-only" id="visits-card">
+			<h3>Log Tamu <button type="button" id="visits-refresh" title="Muat ulang">↻</button></h3>
+			<div id="visits-stats"></div>
+			<div id="visits"><div class="empty">Memuat...</div></div>
+		</div>
 		<div class="card" id="guests-card" hidden>
 			<h3>Tamu <span id="guest-count"></span></h3>
 			<div id="guests"></div>
@@ -757,6 +774,9 @@ const sales = { online: false, allowed: [], pending: {}, status: "", stats: null
 const pa = { online: false, allowed: [], pending: {}, status: "" };
 let filesAt = 0;  // kapan daftar Hasil Kerja terakhir dimuat (link berlaku 1 jam)
 let filesNew = "";
+const visitsPending = {};
+let visitsAt = 0;
+let knownGuests = null;  // tamu online yang sudah diketahui (untuk notifikasi tamu baru)
 // staf yang diisi Onel: nama karakter -> keterangan peran yang dikirim di depan pesan
 const PA_ROLES = {
 	Riset: { hint: "cari prospek, cek kompetitor, rangkum pasar...", tag: "Riset Prospek & Pasar" },
@@ -891,6 +911,7 @@ function applyAccount() {
 	salesRefresh();
 	paRefresh();
 	if (paCan() && pa.online && !filesAt) filesLoad();
+	if (isFounder() && !visitsAt && net.ok) visitsLoad();
 	$("chat").placeholder = isFounder() ? "Tulis pesan (balon di atas kepalamu)" : "Khusus founder, masuk dulu";
 }
 function openLogin() {
@@ -1329,6 +1350,72 @@ $("brief-rev").onclick = () => {
 	$("pa").focus();
 };
 
+// ---------- Log Tamu (dicatat perantara VPS dari presence; semua founder boleh membaca) ----------
+async function visitsLoad() {
+	if (!isFounder()) return;
+	try {
+		const { id } = await salesApi({ bot: "office", op: "visits" });
+		visitsPending[id] = setTimeout(() => {
+			delete visitsPending[id];
+			if (!visitsAt) $("visits").innerHTML = '<div class="empty">Pencatat di VPS belum menjawab. Coba ↻ lagi nanti.</div>';
+		}, 15000);
+	} catch (err) {
+		$("visits").innerHTML = "";
+		$("visits").append(el("div", "empty", "Gagal memuat: " + err.message));
+	}
+}
+function fmtWhen(ts) {
+	const d = new Date(ts * 1000), now = new Date();
+	const hm = d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+	const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+	const diff = Math.round((day(now) - day(d)) / 86400000);
+	return (diff === 0 ? "Hari ini" : diff === 1 ? "Kemarin" : d.toLocaleDateString("id-ID", { day: "numeric", month: "short" })) + " " + hm;
+}
+function fmtDur(sec) {
+	if (sec < 60) return "< 1 mnt";
+	const m = Math.round(sec / 60);
+	return m < 60 ? m + " mnt" : Math.floor(m / 60) + " jam " + (m % 60) + " mnt";
+}
+async function visitsOnReply(p) {
+	if (!p || !visitsPending[p.id]) return;
+	clearTimeout(visitsPending[p.id]);
+	delete visitsPending[p.id];
+	let d;
+	try { d = await salesApi({ open: p.box, bot: "office" }); } catch (err) { return; }
+	visitsAt = Date.now();
+	const list = d.visits || [];
+	const st = d.stats || {};
+	$("visits-stats").textContent = "7 hari terakhir: " + (st.week || 0) + " kunjungan · " + (st.week_unique || 0) + " tamu";
+	const box = $("visits");
+	box.textContent = "";
+	if (!list.length) return box.append(el("div", "empty", "Belum ada tamu yang main ke kantor."));
+	const now = Date.now() / 1000;
+	for (const v of list) {
+		const row = el("div", "visit");
+		row.append(el("span", "", v.g === "f" ? "👧" : v.g === "m" ? "👦" : "🙂"));
+		const who = el("div", "who");
+		who.append(el("b", "", v.name || "Tamu"));
+		const live = !v.end;
+		who.append(el("small", "", fmtWhen(v.start) + " · " + fmtDur((live ? now : v.end) - v.start)));
+		row.append(who);
+		if (live) row.append(el("span", "tag live", "di kantor"));
+		else if (v.returning) row.append(el("span", "tag", "kembali"));
+		box.append(row);
+	}
+}
+// dipanggil saat daftar online berubah: beri tahu founder kalau ada tamu baru masuk
+function visitsOnOnline(list) {
+	const guests = list.filter((e) => /^g:/.test(e.k) && (!isGuestChar() || e.k !== "g:" + guest.id));
+	const keys = new Set(guests.map((e) => e.k));
+	if (knownGuests && isFounder()) {
+		for (const e of guests) if (!knownGuests.has(e.k)) toast("👋 Tamu masuk ke kantor: " + (e.n || "Tamu"));
+		const changed = guests.some((e) => !knownGuests.has(e.k)) || [...knownGuests].some((k) => !keys.has(k));
+		if (changed) setTimeout(visitsLoad, 2500);  // beri waktu VPS mencatat dulu
+	}
+	knownGuests = keys;
+}
+$("visits-refresh").onclick = () => visitsLoad();
+
 // ---------- Hasil Kerja: file dari Onel (disimpan perantara VPS di Supabase Storage privat) ----------
 // Daftar + link bertanda tangan (berlaku 1 jam) diminta lewat /api/sales {bot:"pa", op:"files"}.
 const FILE_IC = { docx: "📝", doc: "📝", pdf: "📕", xlsx: "📊", xls: "📊", csv: "📊", pptx: "📽️", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", webp: "🖼️", md: "📄", txt: "📄" };
@@ -1512,6 +1599,7 @@ function netSetOnline(entries) {
 		if (FOUNDERS.some((f) => f[2] === e.k) || /^g:[a-z0-9]{4,16}$/.test(e.k)) seen[e.k] = [e.n || "", e.g || ""];
 	}
 	const list = Object.keys(seen).sort().map((k) => ({ k, n: seen[k][0], g: seen[k][1] }));
+	visitsOnOnline(list);
 	const sig = JSON.stringify(list);
 	if (sig === net.onlineSig && net.godot) return;
 	net.online = list;
@@ -1566,6 +1654,7 @@ async function netStart() {
 			ch.on("broadcast", { event: "pa_status" }, ({ payload }) => paOnStatus(payload));
 			ch.on("broadcast", { event: "pa_rep" }, ({ payload }) => paOnReply(payload));
 			ch.on("broadcast", { event: "pa_file" }, ({ payload }) => paOnFile(payload));
+			ch.on("broadcast", { event: "office_rep" }, ({ payload }) => visitsOnReply(payload));
 			ch.on("presence", { event: "sync" }, () => {
 				const keys = [];
 				let bot = false, paBot = false;
@@ -1589,6 +1678,7 @@ async function netStart() {
 			});
 			ch.subscribe((status) => {
 				net.ok = status === "SUBSCRIBED";
+				if (net.ok && isFounder() && !visitsAt) setTimeout(visitsLoad, 1500);
 				if (net.ok) {
 					net.tracked = "";
 					netTrack();
@@ -1748,7 +1838,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1909216,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1909776,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
