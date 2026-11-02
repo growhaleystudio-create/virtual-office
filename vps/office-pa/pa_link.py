@@ -24,6 +24,9 @@ import logging
 import os
 import secrets
 import time
+import re
+import urllib.error
+import urllib.parse
 import urllib.request
 
 from telethon import TelegramClient, events
@@ -117,6 +120,81 @@ async def set_status(text: str, busy: bool = False):
     await broadcast("pa_status", {"text": text, "busy": busy})
 
 
+# ---------- Hasil Kerja: file dari bot disimpan di Supabase Storage (bucket privat) ----------
+# Butuh SUPABASE_SECRET (secret / service_role key) di ~/office-pa/.env. Kunci ini HANYA di VPS.
+BUCKET = "hasil-kerja"
+MAX_FILE = 20 * 1024 * 1024
+ROLES = ("Riset", "Copywriter", "Desainer", "Admin")
+
+
+def _storage_sync(method, path, data=None, ctype="application/json", extra=None):
+    key = os.getenv("SUPABASE_SECRET", "")
+    url = os.getenv("SUPABASE_URL", "").rstrip("/") + "/storage/v1/" + path
+    if isinstance(data, (dict, list)):
+        data = json.dumps(data).encode()
+    h = {"apikey": key, "Authorization": "Bearer " + key, "Content-Type": ctype}
+    h.update(extra or {})
+    req = urllib.request.Request(url, data=data, method=method, headers=h)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        body = r.read()
+    return json.loads(body) if body[:1] in (b"{", b"[") else body
+
+
+async def storage(*a, **k):
+    return await asyncio.to_thread(_storage_sync, *a, **k)
+
+
+def storage_ready() -> bool:
+    return bool(os.getenv("SUPABASE_SECRET"))
+
+
+async def ensure_bucket():
+    if not storage_ready():
+        log.info("Hasil Kerja nonaktif (SUPABASE_SECRET belum diisi)")
+        return
+    try:
+        await storage("POST", "bucket", {"id": BUCKET, "name": BUCKET, "public": False, "file_size_limit": MAX_FILE})
+        log.info("bucket %s dibuat", BUCKET)
+    except urllib.error.HTTPError as e:
+        body = e.read()[:200]
+        if b"already exists" not in body and b"Duplicate" not in body:
+            log.warning("buat bucket gagal: %s %s", e.code, body)
+
+
+def _safe_name(name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "", name).strip().replace(" ", "_")
+    return (name or "dokumen")[:80]
+
+
+def parse_key(key: str) -> dict:
+    """<waktu>__<peran>__<nama file> -> info untuk kantor."""
+    parts = key.split("__", 2)
+    if len(parts) != 3:
+        return {"key": key, "name": key, "role": "", "time": ""}
+    t = parts[0]
+    nice = f"{t[6:8]}/{t[4:6]} {t[9:11]}:{t[11:13]}" if len(t) >= 13 else t
+    return {"key": key, "name": parts[2], "role": parts[1], "time": nice}
+
+
+async def list_files(limit=40) -> list:
+    res = await storage("POST", f"object/list/{BUCKET}", {"prefix": "", "limit": limit, "offset": 0,
+                                                          "sortBy": {"column": "name", "order": "desc"}})
+    objs = [o for o in res if o.get("id")]
+    if not objs:
+        return []
+    signed = await storage("POST", f"object/sign/{BUCKET}", {"expiresIn": 3600, "paths": [o["name"] for o in objs]})
+    base = os.getenv("SUPABASE_URL", "").rstrip("/") + "/storage/v1"
+    out = []
+    for o, sg in zip(objs, signed):
+        info = parse_key(o["name"])
+        info["size"] = (o.get("metadata") or {}).get("size", 0)
+        if sg.get("signedURL"):
+            info["url"] = base + sg["signedURL"]
+            info["dl"] = info["url"] + "&download=" + urllib.parse.quote(info["name"])
+        out.append(info)
+    return out
+
+
 # ---------- Telegram (akun pemilik) ----------
 class PA:
     def __init__(self):
@@ -130,6 +208,8 @@ class PA:
         self.late_task = None
         # ID topic tujuan di chat bot (pesan pembuat topic); 0 = chat biasa tanpa topic
         self.topic = int(os.getenv("PA_TOPIC", "0") or 0)
+        self.role = "Admin"  # staf yang terakhir diberi tugas dari kantor
+        self._stored = set()
 
     async def start(self):
         await self.client.connect()
@@ -146,6 +226,10 @@ class PA:
                 rt = ev.message.reply_to
                 if not rt or self.topic not in (getattr(rt, "reply_to_top_id", None), getattr(rt, "reply_to_msg_id", None)):
                     return
+            m = ev.message
+            if _is_doc(m) and m.id not in self._stored:
+                self._stored.add(m.id)
+                asyncio.create_task(self._store_file(m))
             if self.collect is not None:
                 self.collect[ev.message.id] = _describe(ev.message)
                 self.last = time.monotonic()
@@ -158,6 +242,27 @@ class PA:
 
         log.info("Telegram siap, perantara ke %s", os.getenv("PA_BOT", "Onel_PA_Bot"))
 
+    async def _store_file(self, m):
+        """File dari bot (docx/pdf/xlsx/...) -> Storage, lalu kabari kantor (event pa_file)."""
+        if not storage_ready():
+            return
+        name = _safe_name(m.file.name or ("dokumen" + (m.file.ext or "")))
+        if (m.file.size or 0) > MAX_FILE:
+            log.warning("file %s terlalu besar (%s byte), dilewati", name, m.file.size)
+            return
+        try:
+            data = await self.client.download_media(m, file=bytes)
+            key = f"{time.strftime('%Y%m%d-%H%M%S')}__{self.role}__{name}"
+            await storage("POST", f"object/{BUCKET}/{urllib.parse.quote(key)}", data,
+                          ctype=m.file.mime_type or "application/octet-stream", extra={"x-upsert": "true"})
+            owner = (self.last_req[0] if self.last_req else "") or os.getenv("PA_OWNER", "angga")
+            info = parse_key(key)
+            log.info("file tersimpan: %s (%d byte) untuk %s", key, len(data), owner)
+            rid = "file-" + secrets.token_hex(6)
+            await broadcast("pa_file", {"id": rid, "box": seal({"id": rid, "to": owner, "file": info})})
+        except Exception:  # noqa: BLE001
+            log.exception("simpan file %s gagal", name)
+
     async def _flush_late(self):
         while time.monotonic() - self.last < QUIET:
             await asyncio.sleep(0.5)
@@ -168,9 +273,12 @@ class PA:
         rid = "late-" + secrets.token_hex(6)
         log.info("balasan terlambat untuk %s", self.last_req[0])
         await broadcast("pa_rep", {"id": rid, "late": True,
-                                   "box": seal({"id": rid, "to": self.last_req[0], "reply": "\n\n".join(parts)[:4000]})})
+                                   "box": seal({"id": rid, "to": self.last_req[0], "reply": "\n\n".join(parts)[:15000]})})
 
     async def ask(self, text: str, who: str = "") -> str:
+        mr = re.search(r"staf (\w+)", text[:120])
+        if mr and mr.group(1) in ROLES:
+            self.role = mr.group(1)
         async with self.lock:
             self.last_req = (who, time.monotonic())
             self.late = {}
@@ -206,8 +314,15 @@ def _clean(parts):
     return parts
 
 
+def _is_doc(m) -> bool:
+    return bool(m.document) and not m.sticker and not m.gif and not m.video_note
+
+
 def _describe(m) -> str:
     txt = (m.message or "").strip()
+    if _is_doc(m) and storage_ready():
+        fn = m.file.name or "dokumen"
+        return (txt + "\n" if txt else "") + f"[file {fn} tersimpan di Hasil Kerja]"
     if m.media and type(m.media).__name__ == "MessageMediaWebPage":
         return txt  # pratinjau link, bukan lampiran
     if m.media and not txt:
@@ -226,7 +341,7 @@ _seen = {}
 
 async def handle_req(pa: PA, payload):
     d = unseal(payload.get("box", ""))
-    if not d or not d.get("id") or not d.get("text"):
+    if not d or not d.get("id") or not (d.get("text") or d.get("op")):
         log.warning("permintaan kantor ditolak (amplop tidak sah)")
         return
     if d.get("bot") != "pa":
@@ -237,6 +352,16 @@ async def handle_req(pa: PA, payload):
     _seen[d["id"]] = now
     for k in [k for k, t in _seen.items() if now - t > 600]:
         _seen.pop(k, None)
+    if d.get("op") == "files":
+        # daftar Hasil Kerja + link bertanda tangan (1 jam), hanya untuk founder peminta
+        try:
+            files = await list_files() if storage_ready() else []
+            note = "" if storage_ready() else "Penyimpanan belum aktif (SUPABASE_SECRET belum diisi di VPS)."
+        except Exception as e:  # noqa: BLE001
+            log.exception("daftar file gagal")
+            files, note = [], f"Gagal membaca daftar file: {e}"
+        await broadcast("pa_rep", {"id": d["id"], "box": seal({"id": d["id"], "to": d.get("from"), "files": files, "note": note})})
+        return
     name = d.get("name") or d.get("from")
     await set_status("sedang mengerjakan", True)
     try:
@@ -245,7 +370,7 @@ async def handle_req(pa: PA, payload):
         log.exception("tanya PA gagal")
         reply = f"Gagal menghubungi bot: {e}"
     log.info("balasan untuk %s: %d karakter", name, len(reply))
-    await broadcast("pa_rep", {"id": d["id"], "box": seal({"id": d["id"], "to": d.get("from"), "reply": reply[:4000]})})
+    await broadcast("pa_rep", {"id": d["id"], "box": seal({"id": d["id"], "to": d.get("from"), "reply": reply[:15000]})})
     await set_status("")
 
 
@@ -307,6 +432,7 @@ async def main():
             raise SystemExit(f"env {k} belum diisi")
     pa = PA()
     await pa.start()
+    await ensure_bucket()
     await asyncio.gather(supabase_loop(pa), pa.client.run_until_disconnected())
 
 

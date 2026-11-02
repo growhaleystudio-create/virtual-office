@@ -44,7 +44,13 @@ module.exports = async (req, res) => {
 		if (body.open) {
 			const d = open(body.open);
 			if (!d || d.to !== who.k) return send(res, 400, { error: "Balasan tidak sah" });
-			return send(res, 200, { id: d.id, reply: d.reply || "", note: d.note || "" });
+			return send(res, 200, { id: d.id, reply: d.reply || "", note: d.note || "", files: d.files || null, file: d.file || null });
+		}
+		if (bot === "pa" && body.op === "files") {
+			// daftar Hasil Kerja (dijawab perantara di VPS, terenkripsi untuk founder ini)
+			const id = crypto.randomBytes(8).toString("hex");
+			await broadcast("pa_req", { id, box: seal({ id, bot, op: "files", from: who.k, name: who.n, ts: Date.now() }) });
+			return send(res, 200, { id });
 		}
 		const text = String(body.text || "").trim().slice(0, bot === "pa" ? 1000 : 500);
 		if (!text) return send(res, 400, { error: "Pesan kosong" });

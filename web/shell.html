@@ -265,6 +265,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 .chip:hover { color: var(--text); }
 #pa-roles .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
 #pa-roles { margin: 0 0 8px; }
+/* Hasil Kerja */
+#files { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+#files .empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.file { display: flex; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.file .ic { font-size: 20px; flex: none; }
+.file .meta { flex: 1; min-width: 0; }
+.file .meta b { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file .meta small { color: var(--muted); font-size: 11px; }
+.file button, .file a { font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--text); cursor: pointer; text-decoration: none; flex: none; }
+.file.new { border-color: var(--blue); }
+#files-refresh { float: right; font-size: 11px; padding: 2px 8px; }
+#doc .sheet { width: min(900px, 100%); height: min(88vh, 100%); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+#doc .bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+#doc .bar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#doc .bar a, #doc .bar button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--ink); color: var(--text); cursor: pointer; text-decoration: none; }
+#doc .bar a { background: var(--blue); border-color: var(--blue); }
+#doc iframe, #doc .msg { flex: 1; width: 100%; border: 0; background: #fff; }
+#doc .msg { display: flex; align-items: center; justify-content: center; background: var(--panel); color: var(--muted); padding: 24px; text-align: center; }
 .keys { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; line-height: 1.9; }
 .keys.touch { display: none; }
 @media (hover: none) and (pointer: coarse) {
@@ -585,6 +603,10 @@ $GODOT_HEAD_INCLUDE
 				<button type="submit" id="pa-go" disabled>Kirim</button>
 			</form>
 		</div>
+		<div class="card pa-owner-only">
+			<h3>Hasil Kerja <button type="button" id="files-refresh" title="Muat ulang">↻</button></h3>
+			<div id="files"><div class="empty">File dari staf Onel (artikel .docx, proposal PDF, Excel) muncul di sini.</div></div>
+		</div>
 		<div class="card">
 			<h3>Chat Founder <span id="chat-info">realtime</span></h3>
 			<div class="log chat-log" id="chat-log"><div class="chat-empty">Belum ada obrolan. Pesan muncul sebagai balon di atas kepala.</div></div>
@@ -639,6 +661,18 @@ $GODOT_HEAD_INCLUDE
 	</aside>
 </div>
 
+<div id="doc" class="modal" role="dialog" aria-label="Baca dokumen">
+	<div class="sheet">
+		<div class="bar">
+			<b id="doc-title">Dokumen</b>
+			<a id="doc-dl" href="#" download>Download</a>
+			<button type="button" id="doc-close">Tutup</button>
+		</div>
+		<iframe id="doc-frame" sandbox="allow-same-origin" title="Isi dokumen"></iframe>
+		<div class="msg" id="doc-msg" hidden></div>
+	</div>
+</div>
+
 <div id="call" role="dialog" aria-label="Video meeting">
 	<div class="bar">
 		<b id="call-title">Video Meeting</b>
@@ -662,6 +696,8 @@ const $ = (id) => document.getElementById(id);
 // keadaan karyawan AI Sales Sawit (lihat bagian "karyawan AI" di bawah)
 const sales = { online: false, allowed: [], pending: {}, status: "", stats: null };
 const pa = { online: false, allowed: [], pending: {}, status: "" };
+let filesAt = 0;  // kapan daftar Hasil Kerja terakhir dimuat (link berlaku 1 jam)
+let filesNew = "";
 // staf yang diisi Onel: nama karakter -> keterangan peran yang dikirim di depan pesan
 const PA_ROLES = {
 	Riset: { hint: "cari prospek, cek kompetitor, rangkum pasar...", tag: "Riset Prospek & Pasar" },
@@ -795,6 +831,7 @@ function applyAccount() {
 	$("chat").disabled = $("chat-go").disabled = !isFounder();
 	salesRefresh();
 	paRefresh();
+	if (paCan() && pa.online && !filesAt) filesLoad();
 	$("chat").placeholder = isFounder() ? "Tulis pesan (balon di atas kepalamu)" : "Khusus founder, masuk dulu";
 }
 function openLogin() {
@@ -1164,6 +1201,115 @@ async function paSend(role, text, shown) {
 		paLog(role, "(gagal mengirim: " + err.message + ")", "me");
 	}
 }
+// ---------- Hasil Kerja: file dari Onel (disimpan perantara VPS di Supabase Storage privat) ----------
+// Daftar + link bertanda tangan (berlaku 1 jam) diminta lewat /api/sales {bot:"pa", op:"files"}.
+const FILE_IC = { docx: "📝", doc: "📝", pdf: "📕", xlsx: "📊", xls: "📊", csv: "📊", pptx: "📽️", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", webp: "🖼️", md: "📄", txt: "📄" };
+function extOf(n) { return (String(n).split(".").pop() || "").toLowerCase(); }
+async function filesLoad() {
+	if (!paCan() || !pa.online) return;
+	try {
+		const { id } = await salesApi({ bot: "pa", op: "files" });
+		pa.pending[id] = { files: true, timer: setTimeout(() => delete pa.pending[id], 30000) };
+	} catch (err) {
+		renderFiles([], "Gagal memuat: " + err.message);
+	}
+}
+function renderFiles(list, note) {
+	filesAt = Date.now();
+	const box = $("files");
+	box.textContent = "";
+	if (!list.length) {
+		box.append(el("div", "empty", note || "Belum ada file. Minta staf Onel membuat dokumen, misalnya Copywriter menulis artikel."));
+		return;
+	}
+	for (const f of list) {
+		const row = el("div", "file" + (f.key === filesNew ? " new" : ""));
+		row.append(el("span", "ic", FILE_IC[extOf(f.name)] || "📎"));
+		const meta = el("div", "meta");
+		meta.append(el("b", "", f.name));
+		const kb = f.size ? (f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(f.size / 1024)) + " KB") : "";
+		meta.append(el("small", "", [f.role, f.time, kb].filter(Boolean).join(" · ")));
+		row.append(meta);
+		if (f.url) {
+			const rd = el("button", "", "Baca");
+			rd.type = "button";
+			rd.onclick = () => openDoc(f);
+			const dl = el("a", "", "⬇");
+			dl.href = f.dl || f.url;
+			dl.title = "Download";
+			row.append(rd, dl);
+		}
+		box.append(row);
+	}
+}
+let mammothP = null;
+async function openDoc(f) {
+	if (Date.now() - filesAt > 50 * 60 * 1000) {  // link sudah hampir kedaluwarsa: muat ulang dulu
+		filesLoad();
+		return toast("Link diperbarui, klik Baca lagi");
+	}
+	const ext = extOf(f.name);
+	$("doc-title").textContent = f.name;
+	$("doc-dl").href = f.dl || f.url;
+	const frame = $("doc-frame"), msg = $("doc-msg");
+	frame.hidden = false;
+	msg.hidden = true;
+	frame.removeAttribute("src");
+	frame.srcdoc = "<p style='font:14px sans-serif;color:#666;padding:24px'>Memuat dokumen...</p>";
+	$("doc").classList.add("open");
+	try {
+		if (ext === "pdf") {
+			frame.removeAttribute("srcdoc");
+			frame.removeAttribute("sandbox");
+			frame.src = f.url;
+		} else if (ext === "docx") {
+			frame.setAttribute("sandbox", "allow-same-origin");
+			mammothP = mammothP || loadScript("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js");
+			await mammothP;
+			const buf = await (await fetch(f.url)).arrayBuffer();
+			const out = await window.mammoth.convertToHtml({ arrayBuffer: buf });
+			frame.srcdoc = DOC_CSS + out.value;
+		} else if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) {
+			frame.setAttribute("sandbox", "allow-same-origin");
+			frame.srcdoc = "<body style='margin:0;display:grid;place-items:center;background:#222'><img style='max-width:100%' src='" + f.url.replace(/'/g, "%27") + "'></body>";
+		} else if (["txt", "md", "csv"].includes(ext)) {
+			frame.setAttribute("sandbox", "allow-same-origin");
+			const t = await (await fetch(f.url)).text();
+			const pre = document.createElement("pre");
+			pre.textContent = t;
+			frame.srcdoc = DOC_CSS + "<pre style='white-space:pre-wrap'>" + pre.innerHTML + "</pre>";
+		} else {
+			frame.hidden = true;
+			msg.hidden = false;
+			msg.textContent = "Pratinjau belum tersedia untuk file ." + ext + ". Klik Download untuk membukanya.";
+		}
+	} catch (err) {
+		frame.hidden = true;
+		msg.hidden = false;
+		msg.textContent = "Dokumen gagal dimuat (" + err.message + "). Coba Download.";
+	}
+}
+const DOC_CSS = "<style>body{font:16px/1.7 Georgia,'Times New Roman',serif;color:#222;max-width:720px;margin:0 auto;padding:32px 24px}h1{font:700 28px/1.3 system-ui,sans-serif}h2{font:700 21px/1.35 system-ui,sans-serif;margin-top:1.6em}h3{font:600 17px/1.4 system-ui,sans-serif}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}img{max-width:100%}a{color:#177DB5}</style>";
+function toast(t) { const fb = $("feedback"); if (fb) fb.textContent = t; }
+$("doc-close").onclick = () => { $("doc").classList.remove("open"); $("doc-frame").removeAttribute("src"); $("doc-frame").srcdoc = ""; };
+$("doc").onclick = (e) => { if (e.target === $("doc")) $("doc-close").onclick(); };
+$("files-refresh").onclick = () => filesLoad();
+async function paOnFile(p) {
+	if (!p || !paCan()) return;
+	try {
+		const d = await salesApi({ open: p.box, bot: "pa" });
+		const f = d.file;
+		if (!f) return;
+		filesNew = f.key;
+		const role = PA_ROLES[f.role] ? f.role : paRole;
+		paLog(role, "📄 File selesai: " + f.name + " (lihat di Hasil Kerja)");
+		send("say", JSON.stringify({ name: role, text: "Selesai! 📄 " + f.name }));
+		send("run", role + " lapor ke aku");
+		toast(role + " menyerahkan " + f.name);
+		filesLoad();
+	} catch (err) { /* bukan untuk kita */ }
+}
+
 // ---------- pecut "CETAS!" = suruh karyawan AI cepat ----------
 // Godot memanggil window.ovWhip(nama) saat karakter dipecut. Hanya pemilik bot yang bisa;
 // jeda 30 dtk per bot supaya pecutan beruntun tidak membanjiri bot.
@@ -1191,11 +1337,22 @@ window.ovWhip = function (name) {
 async function paOnReply(p) {
 	if (!p) return;
 	let role = paBusyChar || paRole;
+	let isFiles = false;
 	if (pa.pending[p.id]) {
 		role = pa.pending[p.id].role;
+		isFiles = !!pa.pending[p.id].files;
 		clearTimeout(pa.pending[p.id].timer);
 		delete pa.pending[p.id];
 	} else if (!(p.late && paCan())) return;  // balasan terlambat: dibuka hanya bila memang untuk kita
+	if (isFiles) {
+		try {
+			const d = await salesApi({ open: p.box, bot: "pa" });
+			renderFiles(d.files || [], d.note);
+		} catch (err) {
+			renderFiles([], "Gagal membuka daftar: " + err.message);
+		}
+		return;
+	}
 	try {
 		const d = await salesApi({ open: p.box, bot: "pa" });
 		paLog(role, d.reply);
@@ -1279,6 +1436,7 @@ async function netStart() {
 			ch.on("broadcast", { event: "sales_rep" }, ({ payload }) => salesOnReply(payload));
 			ch.on("broadcast", { event: "pa_status" }, ({ payload }) => paOnStatus(payload));
 			ch.on("broadcast", { event: "pa_rep" }, ({ payload }) => paOnReply(payload));
+			ch.on("broadcast", { event: "pa_file" }, ({ payload }) => paOnFile(payload));
 			ch.on("presence", { event: "sync" }, () => {
 				const keys = [];
 				let bot = false, paBot = false;
@@ -1290,6 +1448,7 @@ async function netStart() {
 				netSetOnline(keys);
 				if (paBot !== pa.online) {
 					pa.online = paBot;
+					if (paBot) setTimeout(filesLoad, 500);
 					if (!paBot) for (const r of Object.keys(PA_ROLES)) send("ext", JSON.stringify({ name: r, text: "", ttl: 0 }));
 					paRefresh();
 				}
