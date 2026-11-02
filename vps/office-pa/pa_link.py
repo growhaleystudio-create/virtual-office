@@ -124,6 +124,8 @@ async def set_status(text: str, busy: bool = False):
 # Butuh SUPABASE_SECRET (secret / service_role key) di ~/office-pa/.env. Kunci ini HANYA di VPS.
 BUCKET = "hasil-kerja"
 MAX_FILE = 20 * 1024 * 1024
+LONG_TEXT = 1500  # balasan teks sepanjang ini (mis. artikel) juga disimpan sebagai .docx
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ROLES = ("Riset", "Copywriter", "Desainer", "Admin")
 
 
@@ -252,16 +254,34 @@ class PA:
             return
         try:
             data = await self.client.download_media(m, file=bytes)
-            key = f"{time.strftime('%Y%m%d-%H%M%S')}__{self.role}__{name}"
-            await storage("POST", f"object/{BUCKET}/{urllib.parse.quote(key)}", data,
-                          ctype=m.file.mime_type or "application/octet-stream", extra={"x-upsert": "true"})
-            owner = (self.last_req[0] if self.last_req else "") or os.getenv("PA_OWNER", "angga")
-            info = parse_key(key)
-            log.info("file tersimpan: %s (%d byte) untuk %s", key, len(data), owner)
-            rid = "file-" + secrets.token_hex(6)
-            await broadcast("pa_file", {"id": rid, "box": seal({"id": rid, "to": owner, "file": info})})
+            await self._store_bytes(data, name, m.file.mime_type or "application/octet-stream")
         except Exception:  # noqa: BLE001
             log.exception("simpan file %s gagal", name)
+
+    async def _store_bytes(self, data: bytes, name: str, mime: str):
+        key = f"{time.strftime('%Y%m%d-%H%M%S')}__{self.role}__{name}"
+        await storage("POST", f"object/{BUCKET}/{urllib.parse.quote(key)}", data, ctype=mime, extra={"x-upsert": "true"})
+        owner = (self.last_req[0] if self.last_req else "") or os.getenv("PA_OWNER", "angga")
+        info = parse_key(key)
+        log.info("file tersimpan: %s (%d byte) untuk %s", key, len(data), owner)
+        rid = "file-" + secrets.token_hex(6)
+        await broadcast("pa_file", {"id": rid, "box": seal({"id": rid, "to": owner, "file": info})})
+
+    async def keep_long(self, text: str) -> str:
+        """Balasan teks panjang (artikel dsb.) -> simpan juga sebagai .docx; kembalikan ringkasan untuk chat."""
+        if len(text) < LONG_TEXT or not storage_ready():
+            return text
+        try:
+            import md2docx  # python-docx (di venv bot)
+
+            title = md2docx.title_of(text)
+            data = await asyncio.to_thread(md2docx.convert, text)
+            await self._store_bytes(data, _safe_name(title) + ".docx", DOCX_MIME)
+            head = text[:400].rsplit(" ", 1)[0]
+            return f"{head}...\n\n[teks lengkap ({len(text.split())} kata) disimpan di Hasil Kerja sebagai {_safe_name(title)}.docx]"
+        except Exception:  # noqa: BLE001
+            log.exception("simpan teks panjang gagal")
+            return text
 
     async def _flush_late(self):
         while time.monotonic() - self.last < QUIET:
@@ -272,8 +292,9 @@ class PA:
             return
         rid = "late-" + secrets.token_hex(6)
         log.info("balasan terlambat untuk %s", self.last_req[0])
+        reply = await self.keep_long("\n\n".join(parts))
         await broadcast("pa_rep", {"id": rid, "late": True,
-                                   "box": seal({"id": rid, "to": self.last_req[0], "reply": "\n\n".join(parts)[:15000]})})
+                                   "box": seal({"id": rid, "to": self.last_req[0], "reply": reply[:15000]})})
 
     async def ask(self, text: str, who: str = "") -> str:
         mr = re.search(r"staf (\w+)", text[:120])
@@ -289,9 +310,11 @@ class PA:
             while True:
                 await asyncio.sleep(0.5)
                 now = time.monotonic()
-                if self.collect and now - self.last >= QUIET:
+                # stiker "loading" tanpa teks belum dihitung sebagai balasan
+                real = any(v and v != MEDIA_ONLY for v in self.collect.values())
+                if real and now - self.last >= QUIET:
                     break
-                if not self.collect and now - t0 > FIRST_WAIT:
+                if not real and now - t0 > FIRST_WAIT:
                     break
                 if now - t0 > MAX_WAIT:
                     break
@@ -300,7 +323,7 @@ class PA:
             if not parts:
                 self.last_req = (who, time.monotonic())  # jendela balasan terlambat mulai dari sini
                 return "(bot belum membalas. Kalau nanti membalas dalam 15 menit, balasannya muncul di sini.)"
-            return "\n\n".join(parts)
+        return await self.keep_long("\n\n".join(parts))
 
 
 MEDIA_ONLY = "[mengirim file/gambar, lihat di Telegram]"
@@ -319,7 +342,8 @@ def _is_doc(m) -> bool:
 
 
 def _describe(m) -> str:
-    txt = (m.message or "").strip()
+    # m.text = teks + format Telegram dalam Markdown (**tebal**, __miring__) -> heading terbaca di .docx
+    txt = (m.text or m.message or "").strip()
     if _is_doc(m) and storage_ready():
         fn = m.file.name or "dokumen"
         return (txt + "\n" if txt else "") + f"[file {fn} tersimpan di Hasil Kerja]"

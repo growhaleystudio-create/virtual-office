@@ -1175,6 +1175,7 @@ function paRefresh() {
 	$("pa").placeholder = !paCan() ? "Hanya pemilik bot" : !pa.online ? "Perantara di VPS sedang offline" : paRole + ": " + PA_ROLES[paRole].hint;
 }
 function paLog(who, text, cls) {
+	text = String(text).replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1");  // format Telegram
 	const line = el("div", cls || "");
 	line.append(el("b", "", who + ": "), document.createTextNode(text));
 	$("pa-log").append(line);
@@ -1356,7 +1357,8 @@ async function paOnReply(p) {
 	try {
 		const d = await salesApi({ open: p.box, bot: "pa" });
 		paLog(role, d.reply);
-		const short = d.reply.length > 120 ? d.reply.slice(0, 117) + "..." : d.reply;
+		const plain = d.reply.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1");
+		const short = plain.length > 120 ? plain.slice(0, 117) + "..." : plain;
 		send("say", JSON.stringify({ name: role, text: short }));
 	} catch (err) {
 		paLog(role, "(balasan tidak bisa dibuka: " + err.message + ")", "me");
