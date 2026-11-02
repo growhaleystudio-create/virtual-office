@@ -36,7 +36,7 @@ TOPIC = "growhaley-office"
 QUIET = 6.0  # detik tanpa pesan/edit baru dari bot = balasan dianggap selesai
 FIRST_WAIT = 90.0  # batas menunggu balasan pertama
 MAX_WAIT = 180.0  # batas total satu permintaan
-LATE_WINDOW = 900.0  # balasan yang datang setelah batas tunggu tetap diteruskan selama 15 menit
+LATE_WINDOW = 1800.0  # balasan yang datang setelah batas tunggu tetap diteruskan selama 30 menit (artikel panjang)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logging.getLogger("telethon").setLevel(logging.WARNING)
@@ -322,7 +322,7 @@ class PA:
             parts = _clean([got[k] for k in sorted(got)])
             if not parts:
                 self.last_req = (who, time.monotonic())  # jendela balasan terlambat mulai dari sini
-                return "(bot belum membalas. Kalau nanti membalas dalam 15 menit, balasannya muncul di sini.)"
+                return "(Onel masih mengerjakan. Balasannya muncul di sini begitu selesai, maksimal 30 menit.)"
         return await self.keep_long("\n\n".join(parts))
 
 
@@ -389,7 +389,7 @@ async def handle_req(pa: PA, payload):
     name = d.get("name") or d.get("from")
     await set_status("sedang mengerjakan", True)
     try:
-        reply = await pa.ask(str(d["text"])[:1000], d.get("from") or "")
+        reply = await pa.ask(str(d["text"])[:3000], d.get("from") or "")
     except Exception as e:  # noqa: BLE001
         log.exception("tanya PA gagal")
         reply = f"Gagal menghubungi bot: {e}"

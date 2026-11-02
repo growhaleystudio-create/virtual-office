@@ -265,6 +265,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 .chip:hover { color: var(--text); }
 #pa-roles .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
 #pa-roles { margin: 0 0 8px; }
+/* Brief Artikel SEO */
+#brief form { width: min(560px, 100%); max-height: 90vh; overflow-y: auto; }
+#brief .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#brief .grid2 > div { display: flex; flex-direction: column; gap: 4px; }
+#brief select, #brief textarea { font: inherit; font-size: 14px; color: var(--text); background: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+#brief textarea { min-height: 64px; resize: vertical; }
+#brief .req::after { content: " *"; color: #DA457F; }
+@media (max-width: 560px) { #brief .grid2 { grid-template-columns: 1fr; } }
+#pa-brief { display: none; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+body.pa-copy #pa-brief { display: flex; }
+#pa-brief button { font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); cursor: pointer; }
+#pa-brief .main { flex: 1 1 100%; background: #DA457F; border-color: #DA457F; color: #fff; }
+#pa-brief .step { display: none; flex: 1 1 40%; }
+body.brief-open #pa-brief .step { display: block; }
 /* Hasil Kerja */
 #files { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
 #files .empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -599,6 +613,11 @@ body.in-call #call { display: flex; }
 				<span class="chip" data-r="Desainer">Desainer</span>
 				<span class="chip" data-r="Admin">Admin</span>
 			</div>
+			<div id="pa-brief">
+				<button type="button" class="main" id="brief-open">📝 Brief Artikel SEO</button>
+				<button type="button" class="step" id="brief-ok" title="Setujui outline, Copywriter menulis artikel lengkap">✅ Setujui outline</button>
+				<button type="button" class="step" id="brief-rev" title="Minta perubahan outline">✏️ Revisi</button>
+			</div>
 			<div class="log chat-log" id="pa-log"></div>
 			<form class="cmd" id="pa-form">
 				<input id="pa" maxlength="1000" placeholder="Khusus pemilik bot" autocomplete="off" disabled>
@@ -661,6 +680,44 @@ body.in-call #call { display: flex; }
 			<a href="https://growhaley.com" target="_blank" rel="noopener">growhaley.com →</a>
 		</div>
 	</aside>
+</div>
+
+<div id="brief" class="modal" role="dialog" aria-label="Brief Artikel SEO">
+	<form id="brief-form" autocomplete="off">
+		<h2>Brief Artikel SEO</h2>
+		<p>Untuk artikel klien. Copywriter (Onel) mengikuti SOP Artikel SEO Growhaley: kirim outline &amp; meta dulu, setelah kamu setujui baru artikel lengkap ditulis dan disimpan sebagai .docx di Hasil Kerja.</p>
+		<div class="grid2">
+			<div><label class="req" for="bf-client">Klien / brand</label><input id="bf-client" list="bf-clients" maxlength="60" required placeholder="mis. Klinik Gigi Senyum"></div>
+			<div><label for="bf-web">Website klien</label><input id="bf-web" maxlength="120" placeholder="https://..."></div>
+		</div>
+		<datalist id="bf-clients"></datalist>
+		<label class="req" for="bf-kw">Primary keyword</label>
+		<input id="bf-kw" maxlength="100" required placeholder="mis. klinik gigi surabaya">
+		<label for="bf-kw2">Keyword pendukung (secondary, related, long tail)</label>
+		<input id="bf-kw2" maxlength="250" placeholder="pisahkan dengan koma, boleh dikosongkan">
+		<div class="grid2">
+			<div><label for="bf-intent">Search intent</label>
+				<select id="bf-intent"><option value="">Biar Onel cek SERP</option><option>Informational</option><option>Commercial</option><option>Transactional</option><option>Navigational</option></select></div>
+			<div><label for="bf-type">Jenis artikel</label>
+				<select id="bf-type"><option value="">Biar Onel tentukan</option><option>Panduan / cara</option><option>Listicle rekomendasi</option><option>Review</option><option>Perbandingan</option><option>Artikel informasi</option></select></div>
+			<div><label for="bf-len">Panjang</label>
+				<select id="bf-len"><option>± 800 kata</option><option selected>± 1.200 kata</option><option>± 1.500 kata</option><option>2.000+ kata</option></select></div>
+			<div><label for="bf-tone">Gaya bahasa</label>
+				<select id="bf-tone"><option>Formal (Anda)</option><option>Santai (kamu)</option></select></div>
+		</div>
+		<label for="bf-reader">Target pembaca</label>
+		<input id="bf-reader" maxlength="150" placeholder="mis. ibu muda di Surabaya yang mencari dokter gigi anak">
+		<label class="req" for="bf-cta">CTA</label>
+		<input id="bf-cta" maxlength="150" required placeholder="mis. Booking jadwal lewat WhatsApp klinik">
+		<label for="bf-links">Link internal (satu per baris, opsional)</label>
+		<textarea id="bf-links" maxlength="900" placeholder="https://klien.com/layanan&#10;https://klien.com/blog/..."></textarea>
+		<label for="bf-note">Catatan tambahan</label>
+		<textarea id="bf-note" maxlength="400" placeholder="mis. sebut promo November, hindari menyebut kompetitor"></textarea>
+		<div class="row2">
+			<button type="button" id="bf-cancel">Batal</button>
+			<button type="submit" class="primary">Kirim ke Copywriter</button>
+		</div>
+	</form>
 </div>
 
 <div id="doc" class="modal" role="dialog" aria-label="Baca dokumen">
@@ -1171,6 +1228,7 @@ document.querySelectorAll("#pa-roles .chip").forEach((c) => {
 function paCan() { return isFounder() && pa.allowed.includes(session.key); }
 function paRefresh() {
 	document.body.classList.toggle("is-pa-owner", paCan());
+	document.body.classList.toggle("pa-copy", paRole === "Copywriter");
 	$("pa-on").textContent = pa.online ? (pa.status || "online") : "offline";
 	$("pa-on").classList.toggle("off", !pa.online);
 	$("pa").disabled = $("pa-go").disabled = !(paCan() && pa.online);
@@ -1204,6 +1262,73 @@ async function paSend(role, text, shown) {
 		paLog(role, "(gagal mengirim: " + err.message + ")", "me");
 	}
 }
+// ---------- Brief Artikel SEO (Copywriter) ----------
+// Data per klien (web, CTA, link, gaya) diingat di browser ini supaya brief berikutnya cepat.
+function seoClients() { try { return JSON.parse(localStorage.getItem("ov-seo-clients")) || {}; } catch (e) { return {}; } }
+function briefState(open) {
+	if (open !== undefined) { try { localStorage.setItem("ov-brief-open", open ? "1" : ""); } catch (e) {} }
+	let on = false;
+	try { on = localStorage.getItem("ov-brief-open") === "1"; } catch (e) {}
+	document.body.classList.toggle("brief-open", on);
+}
+briefState();
+$("brief-open").onclick = () => {
+	const dl = $("bf-clients");
+	dl.textContent = "";
+	for (const n of Object.keys(seoClients())) { const o = document.createElement("option"); o.value = n; dl.append(o); }
+	$("brief").classList.add("open");
+	setTimeout(() => $("bf-client").focus(), 50);
+};
+$("bf-client").onchange = () => {
+	const c = seoClients()[$("bf-client").value.trim()];
+	if (!c) return;
+	if (!$("bf-web").value) $("bf-web").value = c.web || "";
+	if (!$("bf-cta").value) $("bf-cta").value = c.cta || "";
+	if (!$("bf-links").value) $("bf-links").value = c.links || "";
+	if (c.tone) $("bf-tone").value = c.tone;
+};
+$("bf-cancel").onclick = () => $("brief").classList.remove("open");
+$("brief").onclick = (e) => { if (e.target === $("brief")) $("bf-cancel").onclick(); };
+$("brief-form").onsubmit = (e) => {
+	e.preventDefault();
+	if (!paCan() || !pa.online) return toast("Onel sedang offline");
+	const v = (id) => $(id).value.trim();
+	const client = v("bf-client");
+	const all = seoClients();
+	all[client] = { web: v("bf-web"), cta: v("bf-cta"), links: v("bf-links"), tone: $("bf-tone").value };
+	try { localStorage.setItem("ov-seo-clients", JSON.stringify(all)); } catch (e2) {}
+	const links = v("bf-links").split(/\s+/).filter((x) => /^https?:\/\//.test(x)).slice(0, 12);
+	const lines = [
+		"Brief Artikel SEO (ikuti SOP Artikel SEO Growhaley; TAHAP 1: kirim outline + meta dulu, tunggu persetujuan)",
+		"Klien: " + client + (v("bf-web") ? " (" + v("bf-web") + ")" : ""),
+		"Primary keyword: " + v("bf-kw"),
+		v("bf-kw2") && "Keyword pendukung: " + v("bf-kw2"),
+		"Search intent: " + ($("bf-intent").value || "tentukan dari cek SERP"),
+		"Jenis artikel: " + ($("bf-type").value || "tentukan dari SERP"),
+		"Panjang: " + $("bf-len").value,
+		"Gaya bahasa: " + $("bf-tone").value,
+		v("bf-reader") && "Target pembaca: " + v("bf-reader"),
+		"CTA: " + v("bf-cta"),
+		"Link internal: " + (links.length ? "\n- " + links.join("\n- ") : "tidak ada, pakai penanda [LINK: topik]"),
+		v("bf-note") && "Catatan: " + v("bf-note"),
+	].filter(Boolean);
+	// pilih staf Copywriter lalu kirim
+	document.querySelector('#pa-roles .chip[data-r="Copywriter"]').click();
+	paSend("Copywriter", lines.join("\n"), "📝 Brief artikel: \"" + v("bf-kw") + "\" untuk " + client);
+	briefState(true);
+	$("brief").classList.remove("open");
+	for (const id of ["bf-kw", "bf-kw2", "bf-reader", "bf-note"]) $(id).value = "";
+};
+$("brief-ok").onclick = () => {
+	if (!paCan() || !pa.online) return;
+	paSend("Copywriter", "Outline disetujui. Lanjut TAHAP 2: tulis artikel lengkap sesuai SOP Artikel SEO Growhaley, kirim sebagai teks Markdown (# H1, ## H2), lalu ## FAQ dan ## Meta & Checklist.", "✅ Outline OK, tulis artikel lengkap");
+	briefState(false);
+};
+$("brief-rev").onclick = () => {
+	$("pa").value = "Revisi outline: ";
+	$("pa").focus();
+};
+
 // ---------- Hasil Kerja: file dari Onel (disimpan perantara VPS di Supabase Storage privat) ----------
 // Daftar + link bertanda tangan (berlaku 1 jam) diminta lewat /api/sales {bot:"pa", op:"files"}.
 const FILE_IC = { docx: "📝", doc: "📝", pdf: "📕", xlsx: "📊", xls: "📊", csv: "📊", pptx: "📽️", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", webp: "🖼️", md: "📄", txt: "📄" };

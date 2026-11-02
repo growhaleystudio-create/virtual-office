@@ -52,7 +52,7 @@ module.exports = async (req, res) => {
 			await broadcast("pa_req", { id, box: seal({ id, bot, op: "files", from: who.k, name: who.n, ts: Date.now() }) });
 			return send(res, 200, { id });
 		}
-		const text = String(body.text || "").trim().slice(0, bot === "pa" ? 1000 : 500);
+		const text = String(body.text || "").trim().slice(0, bot === "pa" ? 3000 : 500);
 		if (!text) return send(res, 400, { error: "Pesan kosong" });
 		const id = crypto.randomBytes(8).toString("hex");
 		await broadcast(BOTS[bot].event, { id, box: seal({ id, bot, from: who.k, name: who.n, text, ts: Date.now() }) });
