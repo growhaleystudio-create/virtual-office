@@ -631,7 +631,7 @@ func _painting(pos: Vector3, along_x: bool, col: Color) -> void:
 		var wk := "%d:W" % cf
 		if not _windows.has(wk):
 			_windows[wk] = []
-		_windows[wk].append([pos.z + H / 2.0, 1.0])
+		_windows[wk].append([pos.z + H / 2.0, 1.0, "hiasan"])
 	var fs := Vector3(1.0, 0.8, 0.06) if along_x else Vector3(0.06, 0.8, 1.0)
 	var ps := Vector3(0.84, 0.64, 0.08) if along_x else Vector3(0.08, 0.64, 0.84)
 	_box(pos, fs, Color(0.85, 0.65, 0.3), "planks", 2.0)
@@ -673,6 +673,8 @@ func _build_world() -> void:
 	_build_signs()
 	_flush_walls()
 	_decorate_walls()
+	if "wallaudit" in OS.get_cmdline_user_args():
+		_wall_audit()
 	_build_roof()
 	# gabungkan mesh diam per lantai / per sisi dinding supaya draw call sedikit
 	for f in NFLOORS:
@@ -784,7 +786,7 @@ func _build_floor0() -> void:
 	_outer_seg("S", 0, 5, FH)
 	_outer_seg("S", 7, W, FH)
 	_outer_seg("S", 5, 7, FH - 2.4, 2.4)
-	for x in [3.0, 7.5, 12.0, 17.5, 22.0, 30.5, 39.5]:
+	for x in [3.0, 7.5, 11.5, 17.5, 39.5]:  # x 22 & 30.5 tertutup rak buku / arsip
 		_outer_window("N", x)
 	for z in [4.0, 10.0, 16.5, 23.0, 27.5]:
 		_outer_window("W", z)
@@ -982,7 +984,7 @@ func _build_lobby() -> void:
 		_add_spot("lobby", Vector2i(0, z), "sit", PI / 2, Vector2i(1, z), 0.0)
 	_plant(11, 19)
 	_plant(11, 29)
-	_plant(1, 29)
+	_plant(0, 29)
 	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 25.25 - H / 2.0), false, Color(0.85, 0.6, 0.35))
 	_lamp(Vector2i(5, 23), Color(1, 0.9, 0.75), 1.0, 10.0)
 
@@ -1007,7 +1009,7 @@ func _build_floor1() -> void:
 	_outer_seg("W", 19, H, 1.0)
 	_outer_seg("E", 19, H, 1.0)
 	_outer_seg("S", 0, W, 1.0)
-	for x in [3.0, 9.0, 15.0, 23.0, 32.0, 41.0]:
+	for x in [9.0, 32.0, 41.0]:  # x 3, 15, 23 tertutup rak buku
 		_outer_window("N", x)
 	for z in [3.5, 9.5, 15.5]:
 		_outer_window("W", z)
@@ -1052,9 +1054,9 @@ func _build_stairwell() -> void:
 		_box(p + Vector3(0, 0.95, 0), Vector3(maxf(s.x, 0.12), 0.08, maxf(s.z, 0.12)), DARK_WOOD, "planks")
 		Agent.make_box(cur, p + Vector3(0, 0.45, 0), Vector3(maxf(s.x, 0.05), 0.9, maxf(s.z, 0.05)), Color(0.75, 0.88, 0.95, 0.25))
 	# papan pengumuman
-	_box(Vector3(x0 + 3, 1.6, -H / 2.0 + 0.08), Vector3(2.4, 1.4, 0.08), Color(0.65, 0.45, 0.28), "planks")
+	_box(Vector3(x0 + 1.5, 1.6, -H / 2.0 + 0.08), Vector3(2.4, 1.4, 0.08), Color(0.65, 0.45, 0.28), "planks")
 	for i in 5:
-		_box(Vector3(x0 + 2.1 + i * 0.45, 1.6 + rng.randf_range(-0.4, 0.4), -H / 2.0 + 0.13), Vector3(0.32, 0.36, 0.02), Color.from_hsv(rng.randf(), 0.3, 1.0))
+		_box(Vector3(x0 + 0.6 + i * 0.45, 1.6 + rng.randf_range(-0.4, 0.4), -H / 2.0 + 0.13), Vector3(0.32, 0.36, 0.02), Color.from_hsv(rng.randf(), 0.3, 1.0))
 	_plant(28, 1)
 	_plant(36, 0)
 	_plant(36, 12)
@@ -1108,8 +1110,6 @@ func _build_my_office() -> void:
 	var gl := _cw(Vector2i(6, 0))
 	_box(gl + Vector3(0, 0.5, -0.1), Vector3(0.8, 1.0, 0.6), DARK_WOOD, "planks")
 	_cyl(gl + Vector3(0, 1.25, -0.1), 0.25, 0.5, Color(0.45, 0.65, 0.85), "carpet")
-	var clock := _cyl(Vector3(9 - W / 2.0, 2.4, -H / 2.0 + 0.08), 0.32, 0.06, Color(0.98, 0.96, 0.9))
-	clock.rotation.x = PI / 2
 	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 6.5 - H / 2.0), false, Color(0.55, 0.75, 0.45))
 	# sofa & meja tamu
 	_solid(0, 8, 1, 4)
@@ -1280,8 +1280,9 @@ func _build_signs() -> void:
 	# logo besar di dinding barat lobby (di atas sofa)
 	cur = floors[0]
 	var wn: Node3D = ext_walls[0]["W"]
-	var lp := _facing_node(wn, Vector3(-W / 2.0 + 0.03, 2.25, 21.5 - H / 2.0), Vector3(1, 0, 0))
+	var lp := _facing_node(wn, Vector3(-W / 2.0 + 0.03, 2.25, 19.75 - H / 2.0), Vector3(1, 0, 0))
 	_picture(lp, Vector3.ZERO, Vector2(3.3, 1.1), "sign_blue")
+	_windows["0:W"].append([19.75, 3.3, "hiasan"])
 
 
 # ---------- atap (tampak saat zoom out) ----------
@@ -1567,11 +1568,10 @@ func _build_floor2() -> void:
 	_outer_seg("N", 0, W, 3.0)
 	_outer_seg("W", 0, D, 3.0)
 	_outer_seg("E", 0, D, 3.0)
-	for x in [3.5, 10.5, 18.0, 24.5, 32.5, 40.0]:
+	for x in [3.5, 10.5, 18.0, 24.5, 40.0]:  # x 32.5 = dinding logo Hall Founder
 		_outer_window("N", x)
 	for z in [3.5, 14.0]:
-		_outer_window("W", z)
-		_outer_window("E", z)
+		_outer_window("W", z)  # sisi timur tanpa jendela: tertutup dinding latar ruang Angga & Luthfi
 	# fasad kaca menghadap teras (sisi selatan lantai 3)
 	var sn: Node3D = ext_walls[2]["S"]
 	var fz := D - H / 2.0
@@ -3408,3 +3408,75 @@ func _auto_interact(d: float) -> void:
 	me.begin_move(path, best["kind"], best["yaw"], ACT_STATUS.get(act, "diam"), act)
 	_skip_spot = {"pos": p}  # setelah berdiri nanti, tempat ini dilewati sampai menjauh
 	_net_send()
+
+
+# ---------- pemeriksa kerapian dinding luar (dijalankan: Godot --headless --path . -- wallaudit) ----------
+
+## Cari benda yang menabrak jendela dinding luar: hiasan/papan/rak yang menempel di dinding dan
+## menutupi kotak jendela, serta dinding dalam yang ujungnya mendarat di jendela.
+func _wall_audit() -> void:
+	var bad := 0
+	var hits := {}
+	for f in NFLOORS:
+		for side in ["N", "S", "W", "E"]:
+			var wins: Array = _windows.get("%d:%s" % [f, side], [])
+			# 1) dinding dalam yang menempel di dinding luar tepat di jendela
+			for c: Vector2i in _wall_cells[f]:
+				var along := -1.0
+				match side:
+					"N": along = c.x + 0.5 if c.y == 0 else -1.0
+					"S": along = c.x + 0.5 if c.y == H - 1 else -1.0
+					"W": along = c.y + 0.5 if c.x == 0 else -1.0
+					"E": along = c.y + 0.5 if c.x == W - 1 else -1.0
+				if along < 0:
+					continue
+				for wv in wins:
+					if wv.size() > 2:
+						continue  # hiasan yang dicatat, bukan jendela
+					if absf(along - wv[0]) < wv[1] / 2.0 + 0.25:
+						print("TABRAK lantai %d sisi %s: dinding dalam di sel %s mengenai jendela %.1f" % [f + 1, side, c, wv[0]])
+						bad += 1
+			# 2) benda yang menempel di dinding (sejajar, tipis) dan menutupi kotak jendela
+			var nodes: Array = [floors[f]]
+			while not nodes.is_empty():
+				var n: Node = nodes.pop_back()
+				nodes.append_array(n.get_children())
+				if not (n is MeshInstance3D) or n.mesh == null:
+					continue
+				var bb: AABB = n.global_transform * n.mesh.get_aabb()
+				var y0 := bb.position.y - f * FH
+				var y1 := y0 + bb.size.y
+				var a0: float
+				var a1: float
+				var depth: float
+				var dist: float
+				if side in ["N", "S"]:
+					a0 = bb.position.x + W / 2.0
+					a1 = a0 + bb.size.x
+					depth = bb.size.z
+					dist = absf((bb.position.z + bb.size.z / 2.0) - (-H / 2.0 if side == "N" else H / 2.0))
+				else:
+					a0 = bb.position.z + H / 2.0
+					a1 = a0 + bb.size.z
+					depth = bb.size.x
+					dist = absf((bb.position.x + bb.size.x / 2.0) - (-W / 2.0 if side == "W" else W / 2.0))
+				if dist > 0.7 or depth > 0.8 or a1 - a0 > 10.0 or y1 - y0 > 2.6:
+					continue  # bukan benda di dinding ini / dinding itu sendiri
+				for wv in wins:
+					if wv.size() > 2:
+						continue
+					var w0: float = wv[0] - wv[1] / 2.0 - 0.2
+					var w1: float = wv[0] + wv[1] / 2.0 + 0.2
+					var inside := a0 >= w0 - 0.05 and a1 <= w1 + 0.05 and y0 >= 0.85 and y1 <= 2.35
+					if inside:
+						continue  # bagian dari jendela itu sendiri (kaca/kusen)
+					# hanya yang menutupi kaca (di atas ambang 1.0 m); lemari rendah di bawah jendela boleh
+					if minf(a1, wv[0] + wv[1] / 2.0 + 0.1) - maxf(a0, wv[0] - wv[1] / 2.0 - 0.1) > 0.05 and minf(y1, 2.2) - maxf(y0, 1.08) > 0.05:
+						var k := "%d %s jendela %.1f" % [f + 1, side, wv[0]]
+						var e: Array = hits.get(k, [99.0, -99.0, 99.0, -99.0, 0])
+						hits[k] = [minf(e[0], a0), maxf(e[1], a1), minf(e[2], y0), maxf(e[3], y1), e[4] + 1]
+	for k in hits:
+		var e: Array = hits[k]
+		print("TABRAK lantai %s: %d mesh di %.1f-%.1f, tinggi %.1f-%.1f" % [k, e[4], e[0], e[1], e[2], e[3]])
+		bad += 1
+	print("wallaudit selesai: %d masalah" % bad)
