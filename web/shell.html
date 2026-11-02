@@ -87,6 +87,28 @@ header .acct.in { background: var(--blue); border-color: var(--blue); }
 body.is-founder .row.me-row, body.is-guest .row.me-row { display: flex; }
 body.is-founder #guest-btn { display: none; }
 #guest-btn.in { background: #DA457F; border-color: #DA457F; }
+/* kontrol khusus founder / pemilik bot disembunyikan untuk tamu */
+body:not(.is-founder) .founder-only { display: none !important; }
+body:not(.is-sales-owner) .owner-only { display: none !important; }
+body:not(.is-founder) #floors button.locked { display: none; }
+.gender { display: flex; gap: 8px; }
+.gender label {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--ink);
+	color: var(--text);
+	font-size: 14px;
+	cursor: pointer;
+}
+.gender input { position: absolute; opacity: 0; pointer-events: none; }
+.gender label:has(input:checked) { border-color: var(--blue); background: rgba(23, 125, 181, 0.25); }
+.gender label:has(input:focus-visible) { outline: 2px solid var(--blue); }
 #floors button.locked::after { content: " \1F512"; }
 header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .layout {
@@ -423,9 +445,14 @@ $GODOT_HEAD_INCLUDE
 <div id="guestm" class="modal">
 	<form id="guest-form" autocomplete="off">
 		<h2>Masuk sebagai Tamu</h2>
-		<p>Kamu dapat karakter sendiri di Lobby dan bisa jalan pakai WASD atau klik lantai. Lantai 3, perintah, meeting &amp; bot khusus founder.</p>
+		<p>Kamu dapat karakter sendiri di Lobby Lantai 1 dan bisa jalan pakai WASD atau klik lantai.</p>
 		<label for="gs-name">Nama kamu</label>
 		<input id="gs-name" maxlength="20" placeholder="mis. Budi" required>
+		<label>Karaktermu</label>
+		<div class="gender" role="radiogroup">
+			<label><input type="radio" name="gs-g" value="m" checked> Cowok</label>
+			<label><input type="radio" name="gs-g" value="f"> Cewek</label>
+		</div>
 		<div class="row2">
 			<button type="button" id="gs-cancel">Batal</button>
 			<button type="submit" class="primary">Masuk</button>
@@ -520,7 +547,7 @@ $GODOT_HEAD_INCLUDE
 			</div>
 			<p class="hint">Ringan: hanya kantor, cocok untuk HP / laptop lama. Penuh: kota, NPC &amp; kendaraan.</p>
 		</div>
-		<div class="card">
+		<div class="card founder-only">
 			<h3>Video Meeting <span id="meet-where">gratis</span></h3>
 			<p class="meet-info" id="meet-info">Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.</p>
 			<div class="btns">
@@ -528,7 +555,7 @@ $GODOT_HEAD_INCLUDE
 				<button id="join-meet" disabled>Gabung</button>
 			</div>
 		</div>
-		<div class="card">
+		<div class="card owner-only">
 			<h3>Sales Sawit <span id="sales-on" class="off">offline</span></h3>
 			<p class="meet-info" id="sales-info">Karyawan AI: bot Sales Sawit (cari lead, analisa, draft WA). Statusnya tampil di karakter Sales.</p>
 			<div class="log chat-log" id="sales-log"></div>
@@ -540,12 +567,12 @@ $GODOT_HEAD_INCLUDE
 		<div class="card">
 			<h3>Chat Founder <span id="chat-info">realtime</span></h3>
 			<div class="log chat-log" id="chat-log"><div class="chat-empty">Belum ada obrolan. Pesan muncul sebagai balon di atas kepala.</div></div>
-			<form class="cmd" id="chat-form">
+			<form class="cmd founder-only" id="chat-form">
 				<input id="chat" maxlength="140" placeholder="Khusus founder, masuk dulu" autocomplete="off" disabled>
 				<button type="submit" id="chat-go" disabled>Kirim</button>
 			</form>
 		</div>
-		<div class="card">
+		<div class="card founder-only">
 			<h3>Perintah</h3>
 			<form class="cmd" id="cmd-form">
 				<input id="cmd" placeholder="mis. Sales ke pantry" autocomplete="off">
@@ -575,7 +602,7 @@ $GODOT_HEAD_INCLUDE
 				<li><kbd>Klik</kbd> pilih karakter / jalan ke titik</li>
 				<li><kbd>Tahan kiri</kbd> putar kamera</li>
 				<li><kbd>Tahan kanan</kbd> geser kamera</li>
-				<li><kbd>W A S D</kbd> jalankan karaktermu (founder) · tamu: geser kamera</li>
+				<li><kbd>W A S D</kbd> jalankan karaktermu · tanpa karakter: geser kamera</li>
 				<li><kbd>Scroll</kbd> zoom (jauh = bangunan utuh)</li>
 				<li><kbd>0</kbd> tampak luar</li>
 				<li><kbd>L</kbd> kota ringan / penuh</li>
@@ -775,7 +802,8 @@ $("guest-form").onsubmit = (e) => {
 	e.preventDefault();
 	const name = $("gs-name").value.trim().replace(/\s+/g, " ").slice(0, 20);
 	if (!name) return;
-	guest = { id: Math.random().toString(36).slice(2, 10), name };
+	const gsel = document.querySelector('input[name="gs-g"]:checked');
+	guest = { id: Math.random().toString(36).slice(2, 10), name, g: gsel ? gsel.value : "m" };
 	try { localStorage.setItem("ov-guest", JSON.stringify(guest)); } catch (e2) {}
 	$("guestm").classList.remove("open");
 	applyAccount();
@@ -988,6 +1016,7 @@ $("chat-form").onsubmit = (e) => {
 // balasannya datang terenkripsi ("sales_rep") lalu dibuka lewat /api/sales {open}.
 function salesCan() { return isFounder() && sales.allowed.includes(session.key); }
 function salesRefresh() {
+	document.body.classList.toggle("is-sales-owner", salesCan());
 	const on = $("sales-on");
 	on.textContent = sales.online ? (sales.status || "online") : "offline";
 	on.classList.toggle("off", !sales.online);
@@ -1061,9 +1090,9 @@ window.ovNetSend = function (json) {
 function netSetOnline(entries) {
 	const seen = {};
 	for (const e of entries) {
-		if (FOUNDERS.some((f) => f[2] === e.k) || /^g:[a-z0-9]{4,16}$/.test(e.k)) seen[e.k] = e.n || "";
+		if (FOUNDERS.some((f) => f[2] === e.k) || /^g:[a-z0-9]{4,16}$/.test(e.k)) seen[e.k] = [e.n || "", e.g || ""];
 	}
-	const list = Object.keys(seen).sort().map((k) => ({ k, n: seen[k] }));
+	const list = Object.keys(seen).sort().map((k) => ({ k, n: seen[k][0], g: seen[k][1] }));
 	const sig = JSON.stringify(list);
 	if (sig === net.onlineSig && net.godot) return;
 	net.online = list;
@@ -1075,16 +1104,17 @@ function netSetOnline(entries) {
 }
 function myNetKey() { return isFounder() ? session.key : isGuestChar() ? "g:" + guest.id : ""; }
 function myNetName() { return isFounder() ? session.name : isGuestChar() ? guest.name : ""; }
+function myNetGender() { return isGuestChar() && (guest.g === "m" || guest.g === "f") ? guest.g : ""; }
 function netTrack() {
 	const want = myNetKey();
 	if (want === net.tracked) return;
 	if (net.ch && net.ok) {
 		net.tracked = want;
-		if (want) net.ch.track({ key: want, name: myNetName() });
+		if (want) net.ch.track({ key: want, name: myNetName(), g: myNetGender() });
 		else net.ch.untrack();
 	} else if (net.bc) {
 		net.tracked = want;
-		net.bc.postMessage({ t: want ? "hi" : "bye", key: want || net.lastKey, name: myNetName(), id: net.id });
+		net.bc.postMessage({ t: want ? "hi" : "bye", key: want || net.lastKey, name: myNetName(), g: myNetGender(), id: net.id });
 		net.lastKey = want;
 	}
 }
@@ -1116,7 +1146,7 @@ async function netStart() {
 				const keys = [];
 				let bot = false;
 				for (const metas of Object.values(ch.presenceState())) for (const m of metas) {
-					if (m.key) keys.push({ k: String(m.key), n: String(m.name || "").slice(0, 20) });
+					if (m.key) keys.push({ k: String(m.key), n: String(m.name || "").slice(0, 20), g: m.g === "m" || m.g === "f" ? m.g : "" });
 					if (m.bot === "sales") bot = true;
 				}
 				netSetOnline(keys);
@@ -1148,20 +1178,20 @@ async function netStart() {
 		else if (m.t === "chat") chatShow(m.m);
 		else if (m.t === "hello") {
 			send("net_sync");
-			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
+			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), g: myNetGender(), id: net.id });
 		}
 		else if (m.t === "hi") {
 			const fresh = !net.seen[m.id];
-			net.seen[m.id] = { key: m.key, name: m.name, at: Date.now() };
+			net.seen[m.id] = { key: m.key, name: m.name, g: m.g, at: Date.now() };
 			if (fresh) {
 				send("net_sync");
-				if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
+				if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), g: myNetGender(), id: net.id });
 			}
 		} else if (m.t === "bye") delete net.seen[m.id];
 		netLocalOnline();
 	};
 	setInterval(() => {
-		if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), id: net.id });
+		if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), g: myNetGender(), id: net.id });
 		netLocalOnline();
 	}, 3000);
 	addEventListener("pagehide", () => net.tracked && net.bc.postMessage({ t: "bye", id: net.id }));
@@ -1178,7 +1208,7 @@ function netLocalOnline() {
 	const keys = [];
 	for (const [id, v] of Object.entries(net.seen)) {
 		if (now - v.at > 8000) delete net.seen[id];
-		else if (v.key) keys.push({ k: v.key, n: v.name || "" });
+		else if (v.key) keys.push({ k: v.key, n: v.name || "", g: v.g || "" });
 	}
 	netSetOnline(keys);
 }

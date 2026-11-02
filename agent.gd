@@ -110,10 +110,25 @@ static func now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
 
-func setup(p_name: String, shirt: Color, hair: Color) -> void:
+## Gaya rambut per gender: cowok = jabrik, topi jerami, bandana, pendek rapi;
+## cewek = kuncir kuda, sanggul, kuncir dua, panjang terurai.
+const STYLES_M := [6, 1, 5, 3]
+const STYLES_F := [7, 0, 2, 4]
+
+
+## Pilih gaya rambut untuk gender "m" / "f" (n = angka acak/urutan); selain itu -1 (bebas).
+static func style_for(gender: String, n: int) -> int:
+	if gender == "m":
+		return STYLES_M[absi(n) % STYLES_M.size()]
+	if gender == "f":
+		return STYLES_F[absi(n) % STYLES_F.size()]
+	return -1
+
+
+func setup(p_name: String, shirt: Color, hair: Color, look := -1) -> void:
 	agent_name = p_name
 	shirt_color = shirt
-	var style := _count % 6
+	var style := look if look >= 0 else _count % 6
 	_count += 1
 	Look.snap = true
 	_rig = Node3D.new()
@@ -122,7 +137,7 @@ func setup(p_name: String, shirt: Color, hair: Color) -> void:
 
 	var skin := Color(1.0, 0.84, 0.70)
 	var pants: Color = [Color(0.32, 0.42, 0.62), Color(0.45, 0.32, 0.22), Color(0.30, 0.45, 0.32),
-		Color(0.55, 0.40, 0.30), Color(0.28, 0.36, 0.55), Color(0.50, 0.30, 0.38)][style]
+		Color(0.55, 0.40, 0.30), Color(0.28, 0.36, 0.55), Color(0.50, 0.30, 0.38)][style % 6]
 	var boots := Color(0.42, 0.26, 0.16)
 
 	# badan: kaos + celana/overall pendek
@@ -220,6 +235,14 @@ func _build_hair(style: int, hair: Color) -> void:
 		5:  # bandana
 			var band := make_cyl(_head, Vector3(0, 0.2, -0.02), 0.47, 0.12, Color(0.95, 0.85, 0.30), "cloth", 12)
 			band.rotation.x = -0.28
+		6:  # pendek rapi, belah samping (cowok)
+			var sw := make_ball(_head, Vector3(0.12, 0.36, 0.2), 0.2, hair, Vector3(1.5, 0.6, 1.0), "carpet")
+			sw.rotation.z = -0.35
+			make_ball(_head, Vector3(-0.2, 0.33, 0.12), 0.15, hair, Vector3(1.2, 0.7, 1.2), "carpet")
+		7:  # panjang terurai sampai bahu (cewek)
+			make_ball(_head, Vector3(0, -0.3, -0.2), 0.4, hair, Vector3(1.12, 1.25, 0.75), "carpet")
+			for sx in [-1.0, 1.0]:
+				make_ball(_head, Vector3(0.4 * sx, -0.3, 0.02), 0.13, hair, Vector3(0.8, 2.2, 0.9), "carpet")
 
 
 func _limb(pivot_pos: Vector3, radius: float, length: float, color: Color) -> Node3D:

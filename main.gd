@@ -67,6 +67,8 @@ const FOUNDERS := [
 	["Angga", "Web Developer", "angga", Color(0.13, 0.60, 0.60)],
 	["Luthfi", "AI Experience Designer", "luthfi", Color(0.20, 0.30, 0.55)],
 ]
+# gaya rambut tiap founder (lihat Agent._build_hair): cowok 1/3/5/6, cewek 0/2/4/7
+const FOUNDER_LOOK := {"alvin": 1, "dianita": 0, "intan": 2, "ahay": 3, "angga": 6, "luthfi": 5}
 
 var grids: Array[AStarGrid2D] = []
 var floors: Array[Node3D] = []
@@ -609,6 +611,11 @@ func _rug(x: float, z: float, w: float, h: float, color: Color, round_ := false,
 
 
 func _painting(pos: Vector3, along_x: bool, col: Color) -> void:
+	if not along_x and pos.x < -W / 2.0 + 0.5:
+		var wk := "%d:W" % cf
+		if not _windows.has(wk):
+			_windows[wk] = []
+		_windows[wk].append([pos.z + H / 2.0, 1.0])
 	var fs := Vector3(1.0, 0.8, 0.06) if along_x else Vector3(0.06, 0.8, 1.0)
 	var ps := Vector3(0.84, 0.64, 0.08) if along_x else Vector3(0.08, 0.64, 0.84)
 	_box(pos, fs, Color(0.85, 0.65, 0.3), "planks", 2.0)
@@ -959,7 +966,7 @@ func _build_lobby() -> void:
 	_plant(11, 19)
 	_plant(11, 29)
 	_plant(1, 29)
-	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 26 - H / 2.0), false, Color(0.85, 0.6, 0.35))
+	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 25.25 - H / 2.0), false, Color(0.85, 0.6, 0.35))
 	_lamp(Vector2i(5, 23), Color(1, 0.9, 0.75), 1.0, 10.0)
 
 
@@ -1086,7 +1093,7 @@ func _build_my_office() -> void:
 	_cyl(gl + Vector3(0, 1.25, -0.1), 0.25, 0.5, Color(0.45, 0.65, 0.85), "carpet")
 	var clock := _cyl(Vector3(9 - W / 2.0, 2.4, -H / 2.0 + 0.08), 0.32, 0.06, Color(0.98, 0.96, 0.9))
 	clock.rotation.x = PI / 2
-	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 5 - H / 2.0), false, Color(0.55, 0.75, 0.45))
+	_painting(Vector3(-W / 2.0 + 0.05, 1.7, 6.5 - H / 2.0), false, Color(0.55, 0.75, 0.45))
 	# sofa & meja tamu
 	_solid(0, 8, 1, 4)
 	_sofa(_rect_center(0, 8, 1, 4), 4.0, PI / 2, BRAND_INK.lightened(0.15))
@@ -1535,7 +1542,7 @@ func _build_floor2() -> void:
 	# area tak terpakai (teras di bawah) ditandai solid supaya tidak bisa dipilih
 	_solid(0, D, W, H - D)
 	_solid(STAIR_X0, STAIR2_Z, STAIR_X1 - STAIR_X0, 2)  # lubang tangga
-	_floor_finish(0, 8, 28, 2, Color(0.90, 0.91, 0.92), "tiles", 0.5)
+	_floor_finish(0, 8, 28, 3, Color(0.90, 0.91, 0.92), "tiles", 0.5)
 	_floor_finish(34, 0, 2, D, Color(0.90, 0.91, 0.92), "tiles", 0.5)
 	_floor_finish(29, 0, 5, STAIR2_Z, Color(0.90, 0.91, 0.92), "tiles", 0.5)
 	_floor_finish(29, STAIR2_Z + 2, 5, D - STAIR2_Z - 2, Color(0.90, 0.91, 0.92), "tiles", 0.5)
@@ -1563,17 +1570,17 @@ func _build_floor2() -> void:
 
 	# dinding ruangan (kaca di atas setengah dinding, khas ruang eksekutif)
 	_hwall(0, 27, 7, [[6, 7], [20, 21]], true)
-	_hwall(0, 27, 10, [[6, 7], [20, 21]], true)
+	_hwall(0, 27, 11, [[6, 7], [20, 21]], true)
 	_vwall(14, 0, 6, [], true)
-	_vwall(14, 11, 17, [], true)
+	_vwall(14, 12, 17, [], true)
 	_vwall(28, 0, 6, [], true)
-	_vwall(28, 11, 17, [], true)
+	_vwall(28, 12, 17, [], true)
 	_vwall(36, 0, 17, [[3, 4], [12, 13]], true)
 	_hwall(37, 43, 8, [], true)
 
 	# 6 ruang founder
-	var rects := [Rect2i(0, 0, 14, 7), Rect2i(15, 0, 13, 7), Rect2i(0, 11, 14, 7),
-		Rect2i(15, 11, 13, 7), Rect2i(37, 0, 7, 8), Rect2i(37, 9, 7, 9)]
+	var rects := [Rect2i(0, 0, 14, 7), Rect2i(15, 0, 13, 7), Rect2i(0, 12, 14, 6),
+		Rect2i(15, 12, 13, 6), Rect2i(37, 0, 7, 8), Rect2i(37, 9, 7, 9)]
 	var doors := [Vector2i(0, 1), Vector2i(0, 1), Vector2i(0, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(-1, 0)]
 	for i in FOUNDERS.size():
 		_founder_room(FOUNDERS[i], rects[i], doors[i])
@@ -1827,7 +1834,7 @@ func _build_agents() -> void:
 	for info in FOUNDERS:
 		var seat: Dictionary = founder_seats[info[2]]
 		var fa := Agent.new()
-		fa.setup(info[0], info[3], hairs[i % hairs.size()])
+		fa.setup(info[0], info[3], hairs[i % hairs.size()], FOUNDER_LOOK.get(info[2], -1))
 		fa.title = info[1]
 		var y_: float = seat["yaw"]
 		fa.position = cell_to_world(seat["cell"], 2) + Vector3(sin(y_), 0, cos(y_)) * 0.2
@@ -2898,7 +2905,12 @@ func _maybe_screenshot() -> void:
 						row += "?" if not grids[gf].is_in_boundsv(gc) else ("#" if grids[gf].is_point_solid(gc) else ("L" if gc in [LANDING[0], LANDING[1], Vector2i(STAIR_X1, STAIR2_Z), Vector2i(STAIR_X0 - 1, STAIR2_Z)] else "."))
 					print("z%02d %s" % [gz, row])
 			elif c.begins_with("guest "):
-				set_guest(JSON.stringify({"id": "test1234", "name": c.trim_prefix("guest ")}))
+				var gn := c.trim_prefix("guest ")
+				var gg := ""
+				if gn.length() > 2 and gn[1] == " " and gn[0] in ["m", "f"]:
+					gg = gn[0]
+					gn = gn.substr(2)
+				set_guest(JSON.stringify({"id": "test1234", "name": gn, "g": gg}))
 			elif c.begins_with("where"):
 				print("me:", me.position if me else "-", " room:", room_of(me) if me else "-", " status:", me.status if me else "-")
 			elif c.begins_with("chat "):
@@ -2925,7 +2937,7 @@ func _net_send() -> void:
 		return
 	var win := JavaScriptBridge.get_interface("window")
 	if win and win.ovNetSend:
-		win.ovNetSend(JSON.stringify({"k": me_key, "n": me.agent_name, "s": me.net_state()}))
+		win.ovNetSend(JSON.stringify({"k": me_key, "n": me.agent_name, "g": me.get_meta("gender", ""), "s": me.net_state()}))
 
 
 func _on_founder_move(a: Agent) -> void:
@@ -2941,7 +2953,7 @@ func _net_receive(json: String) -> void:
 	if k == me_key or not (m.get("s") is Dictionary):
 		return
 	if k.begins_with("g:"):
-		var g := _guest_npc(k, str(m.get("n", "Tamu")))
+		var g := _guest_npc(k, str(m.get("n", "Tamu")), str(m.get("g", "")))
 		if g:
 			g.apply_net_state(m["s"])
 		return
@@ -2968,13 +2980,13 @@ func _net_set_online(json: String) -> void:
 		if founder_npcs.has(k):
 			now[k] = true
 		elif k.begins_with("g:"):
-			guests_now[k] = str(e.get("n", "Tamu"))
+			guests_now[k] = [str(e.get("n", "Tamu")), str(e.get("g", ""))]
 	for k in guest_npcs.keys():
 		if not guests_now.has(k):
 			guest_npcs[k].queue_free()
 			guest_npcs.erase(k)
 	for k in guests_now:
-		_guest_npc(k, guests_now[k])
+		_guest_npc(k, guests_now[k][0], guests_now[k][1])
 	for k in net_online.keys():
 		if not now.has(k):
 			net_online.erase(k)
@@ -3169,11 +3181,12 @@ func _try_stairs(dir: Vector3, f: int) -> bool:
 
 # ---------- karakter tamu ----------
 
-func _make_guest(name_: String, seed_: String) -> Agent:
+func _make_guest(name_: String, seed_: String, gender := "") -> Agent:
 	var h := absi(seed_.hash())
 	var hairs := [Color(0.12, 0.09, 0.07), Color(0.35, 0.20, 0.10), Color(0.72, 0.55, 0.28), Color(0.20, 0.12, 0.08), Color(0.55, 0.25, 0.15)]
 	var g := Agent.new()
-	g.setup(name_, Color.from_hsv(float(h % 360) / 360.0, 0.5, 0.88), hairs[(h / 360) % hairs.size()])
+	g.setup(name_, Color.from_hsv(float(h % 360) / 360.0, 0.5, 0.88), hairs[(h / 360) % hairs.size()], Agent.style_for(gender, h / 7))
+	g.set_meta("gender", gender)
 	g.title = "Tamu"
 	g.think = 1e9
 	add_child(g)
@@ -3192,12 +3205,24 @@ func _guest_spawn() -> Vector3:
 
 
 ## Tamu lain (dibuat saat pertama terlihat di presence / pesan posisi).
-func _guest_npc(k: String, name_: String) -> Agent:
+func _guest_npc(k: String, name_: String, gender := "") -> Agent:
+	gender = gender if gender in ["m", "f"] else ""
 	if guest_npcs.has(k):
-		return guest_npcs[k]
+		var old: Agent = guest_npcs[k]
+		if gender == "" or old.get_meta("gender", "") == gender:
+			return old
+		# gender baru diketahui / berubah: bangun ulang karakternya di posisi yang sama
+		var st := old.net_state()
+		old.queue_free()
+		guest_npcs.erase(k)
+		var ng := _guest_npc(k, name_, gender)
+		if ng:
+			ng.position = old.position
+			ng.apply_net_state(st)
+		return ng
 	if guest_npcs.size() >= GUEST_MAX:
 		return null
-	var g := _make_guest(name_.strip_edges().left(20), k)
+	var g := _make_guest(name_.strip_edges().left(20), k, gender)
 	var bob := Agent.make_plumbob(g, 0.32, Color(0.85, 0.27, 0.5))
 	bob.position.y = 2.35
 	g.plumbob = bob
@@ -3219,7 +3244,7 @@ func set_guest(json: String) -> void:
 	var name_ := str(m.get("name", "Tamu")).strip_edges().left(20)
 	if name_ == "":
 		name_ = "Tamu"
-	me = _make_guest(name_, "g:" + str(m["id"]))
+	me = _make_guest(name_, "g:" + str(m["id"]), str(m.get("g", "")))
 	me_key = "g:" + str(m["id"])
 	_on_stairs = false
 	me_is_guest = true
