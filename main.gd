@@ -41,11 +41,12 @@ const PLACE_STATUS := {
 const WANDER := ["pantry", "lounge", "meeting", "lobby", "server", "teras", "perpus", "pantry", "teras"]
 const WORK_TASKS := ["menulis laporan", "cek email", "follow up lead", "analisa data", "bekerja"]
 const AGENTS := [
-	["Sales", Color(0.86, 0.32, 0.26), Color(0.25, 0.15, 0.08), "Sales Sawit (AI)"],
-	["Marketing", Color(0.25, 0.52, 0.86), Color(0.55, 0.30, 0.12), "Marketing Specialist"],
-	["Admin", Color(0.35, 0.70, 0.38), Color(0.12, 0.10, 0.10), "Onel PA (AI asisten)"],
-	["Support", Color(0.95, 0.72, 0.22), Color(0.70, 0.45, 0.20), "Customer Support"],
-	["Finance", Color(0.62, 0.40, 0.80), Color(0.20, 0.12, 0.08), "Staf Keuangan"],
+	# Sales = bot Sales Sawit; Riset/Admin/Copywriter/Desainer = bot Onel (satu bot, beda peran)
+	["Sales", Color(0.86, 0.32, 0.26), Color(0.25, 0.15, 0.08), "Sales Sawit (AI) · kontak & follow-up WA"],
+	["Riset", Color(0.25, 0.52, 0.86), Color(0.55, 0.30, 0.12), "Onel (AI) · riset prospek & kompetitor"],
+	["Admin", Color(0.35, 0.70, 0.38), Color(0.12, 0.10, 0.10), "Onel (AI) · dokumen, jadwal & notulen"],
+	["Copywriter", Color(0.95, 0.72, 0.22), Color(0.70, 0.45, 0.20), "Onel (AI) · naskah penawaran & caption"],
+	["Desainer", Color(0.62, 0.40, 0.80), Color(0.20, 0.12, 0.08), "Onel (AI) · proposal, slide & mockup"],
 	["Developer", Color(0.22, 0.66, 0.66), Color(0.40, 0.22, 0.10), "Software Developer"],
 ]
 const SIDE_N := {"N": Vector3(0, 0, -1), "S": Vector3(0, 0, 1), "W": Vector3(-1, 0, 0), "E": Vector3(1, 0, 0)}
@@ -2033,7 +2034,7 @@ func show_feedback(text: String) -> void:
 func _build_bridge() -> void:
 	if OS.has_feature("web"):
 		# versi web (online): karakter jalan sebagai NPC otomatis, tanpa relay AI di laptop
-		bridge_label.text = "Online · Sales & Admin = AI, lainnya NPC"
+		bridge_label.text = "Online · Sales Sawit & Onel = AI, Developer NPC"
 		return
 	bridge = Bridge.new()
 	bridge.main = self
@@ -2599,7 +2600,7 @@ func _build_ui() -> void:
 	feedback = Label.new()
 	vb.add_child(feedback)
 	cmd_input = LineEdit.new()
-	cmd_input.placeholder_text = "Ketik perintah lalu Enter...  (contoh: 'Sales lapor ke aku', 'semua ke teras', 'Admin ke perpus')"
+	cmd_input.placeholder_text = "Ketik perintah lalu Enter...  (contoh: 'Sales lapor ke aku', 'semua ke teras', 'Riset ke perpus')"
 	cmd_input.text_submitted.connect(_on_submit)
 	vb.add_child(cmd_input)
 	if OS.has_feature("web"):
