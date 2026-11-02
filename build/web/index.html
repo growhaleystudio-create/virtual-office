@@ -263,6 +263,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 	border: 1px solid var(--line);
 }
 .chip:hover { color: var(--text); }
+#pa-roles .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+#pa-roles { margin: 0 0 8px; }
 .keys { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; line-height: 1.9; }
 .keys.touch { display: none; }
 @media (hover: none) and (pointer: coarse) {
@@ -571,8 +573,14 @@ body.in-call #call { display: flex; }
 			</form>
 		</div>
 		<div class="card pa-owner-only">
-			<h3>Onel PA <span id="pa-on" class="off">offline</span></h3>
-			<p class="meet-info" id="pa-info">Asisten AI dari bot Telegram @Onel_PA_Bot, tampil sebagai karakter Admin.</p>
+			<h3>Onel <span id="pa-on" class="off">offline</span></h3>
+			<p class="meet-info" id="pa-info">Satu bot AI (@Onel_PA_Bot) mengisi 4 staf. Pilih staf yang mau diajak kerja:</p>
+			<div class="chips" id="pa-roles">
+				<span class="chip on" data-r="Riset">Riset</span>
+				<span class="chip" data-r="Copywriter">Copywriter</span>
+				<span class="chip" data-r="Desainer">Desainer</span>
+				<span class="chip" data-r="Admin">Admin</span>
+			</div>
 			<div class="log chat-log" id="pa-log"></div>
 			<form class="cmd" id="pa-form">
 				<input id="pa" maxlength="1000" placeholder="Khusus pemilik bot" autocomplete="off" disabled>
@@ -595,7 +603,7 @@ body.in-call #call { display: flex; }
 			</form>
 			<div class="chips" id="chips">
 				<span class="chip">semua ke teras</span>
-				<span class="chip">Admin ke perpus</span>
+				<span class="chip">Riset ke perpus</span>
 				<span class="chip">Sales lapor ke aku</span>
 				<span class="chip">semua kerja</span>
 			</div>
@@ -656,6 +664,16 @@ const $ = (id) => document.getElementById(id);
 // keadaan karyawan AI Sales Sawit (lihat bagian "karyawan AI" di bawah)
 const sales = { online: false, allowed: [], pending: {}, status: "", stats: null };
 const pa = { online: false, allowed: [], pending: {}, status: "" };
+// staf yang diisi Onel: nama karakter -> keterangan peran yang dikirim di depan pesan
+const PA_ROLES = {
+	Riset: { hint: "cari prospek, cek kompetitor, rangkum pasar...", tag: "Riset Prospek & Pasar" },
+	Copywriter: { hint: "tulis naskah penawaran, caption, artikel...", tag: "Copywriter" },
+	Desainer: { hint: "buat proposal PDF, slide, mockup...", tag: "Desainer Visual" },
+	Admin: { hint: "dokumen, jadwal, pengingat, notulen...", tag: "Admin & Sekretaris" },
+};
+let paRole = "Riset";
+try { if (PA_ROLES[localStorage.getItem("ov-pa-role")]) paRole = localStorage.getItem("ov-pa-role"); } catch (e) {}
+let paBusyChar = "";  // staf yang sedang menunggu balasan (untuk status di atas kepala)
 const net = { id: Math.random().toString(36).slice(2, 10), ch: null, ok: false, bc: null, seen: {}, online: [], godot: false, tracked: "" };
 function send(cmd, arg) {
 	if (window.ovCommand) {
@@ -1065,8 +1083,11 @@ $("sales-form").onsubmit = async (e) => {
 	const text = $("sales").value.trim();
 	if (!text || !salesCan()) return;
 	$("sales").value = "";
-	salesLog("Kamu", text, "me");
-	send("chat", JSON.stringify({ k: session.key, text }));
+	salesSend(text, text);
+};
+async function salesSend(text, shown) {
+	salesLog("Kamu", shown, "me");
+	send("chat", JSON.stringify({ k: session.key, text: shown }));
 	try {
 		const { id } = await salesApi({ text });
 		sales.pending[id] = setTimeout(() => {
@@ -1076,7 +1097,7 @@ $("sales-form").onsubmit = async (e) => {
 	} catch (err) {
 		salesLog("Sales", "(gagal mengirim: " + err.message + ")", "me");
 	}
-};
+}
 async function salesOnReply(p) {
 	if (!p || !sales.pending[p.id]) return;
 	clearTimeout(sales.pending[p.id]);
@@ -1100,14 +1121,23 @@ function salesOnStatus(p) {
 }
 // ---------- Onel PA: bot Telegram teman lewat userbot di VPS (~/office-pa/pa_link.py) ----------
 // Event "pa_req" / "pa_rep" / "pa_status", presence {bot: "pa"}; API sama: /api/sales {bot: "pa"}.
-const PA_CHAR = "Admin";
+document.querySelectorAll("#pa-roles .chip").forEach((c) => {
+	c.classList.toggle("on", c.dataset.r === paRole);
+	c.onclick = () => {
+		paRole = c.dataset.r;
+		try { localStorage.setItem("ov-pa-role", paRole); } catch (e) {}
+		document.querySelectorAll("#pa-roles .chip").forEach((x) => x.classList.toggle("on", x === c));
+		paRefresh();
+		send("focus", paRole);
+	};
+});
 function paCan() { return isFounder() && pa.allowed.includes(session.key); }
 function paRefresh() {
 	document.body.classList.toggle("is-pa-owner", paCan());
 	$("pa-on").textContent = pa.online ? (pa.status || "online") : "offline";
 	$("pa-on").classList.toggle("off", !pa.online);
 	$("pa").disabled = $("pa-go").disabled = !(paCan() && pa.online);
-	$("pa").placeholder = !paCan() ? "Hanya pemilik bot" : !pa.online ? "Perantara di VPS sedang offline" : "Tanya / suruh Onel PA...";
+	$("pa").placeholder = !paCan() ? "Hanya pemilik bot" : !pa.online ? "Perantara di VPS sedang offline" : paRole + ": " + PA_ROLES[paRole].hint;
 }
 function paLog(who, text, cls) {
 	const line = el("div", cls || "");
@@ -1121,37 +1151,69 @@ $("pa-form").onsubmit = async (e) => {
 	const text = $("pa").value.trim();
 	if (!text || !paCan()) return;
 	$("pa").value = "";
-	paLog("Kamu", text, "me");
+	paSend(paRole, text, text);
+};
+async function paSend(role, text, shown) {
+	paLog("Kamu → " + role, shown, "me");
+	paBusyChar = role;
 	try {
-		const { id } = await salesApi({ text, bot: "pa" });
-		pa.pending[id] = setTimeout(() => {
+		const { id } = await salesApi({ text: "[Kantor virtual Growhaley · kamu sebagai staf " + PA_ROLES[role].tag + "] " + text, bot: "pa" });
+		pa.pending[id] = { role, timer: setTimeout(() => {
 			delete pa.pending[id];
-			paLog("Onel", "(belum ada balasan, cek langsung di Telegram)", "me");
-		}, 200000);
+			paLog(role, "(belum ada balasan, cek langsung di Telegram)", "me");
+		}, 200000) };
 	} catch (err) {
-		paLog("Onel", "(gagal mengirim: " + err.message + ")", "me");
+		paLog(role, "(gagal mengirim: " + err.message + ")", "me");
 	}
+}
+// ---------- pecut "CETAS!" = suruh karyawan AI cepat ----------
+// Godot memanggil window.ovWhip(nama) saat karakter dipecut. Hanya pemilik bot yang bisa;
+// jeda 30 dtk per bot supaya pecutan beruntun tidak membanjiri bot.
+const WHIP_GAP = 30000;
+const whipAt = {};
+const WHIP_SALES = "⚡ CETAS! Founder minta cepat: percepat kerjaan yang lagi jalan dan kasih update singkat progresnya sekarang (sudah sampai mana, sisa apa, kira-kira kapan beres).";
+const WHIP_PA = "⚡ CETAS! Founder minta cepat: percepat tugas yang sedang kamu kerjakan, lalu kirim update singkat sekarang: sudah sampai mana, sisa apa, kapan selesai. Kalau tidak ada tugas berjalan, bilang saja siap menerima tugas.";
+window.ovWhip = function (name) {
+	const isSales = name === "Sales";
+	const isPa = !!PA_ROLES[name];
+	if (!isSales && !isPa) return;  // NPC biasa: cuma efek
+	const can = isSales ? salesCan() && sales.online : paCan() && pa.online;
+	if (!can) return;
+	const bot = isSales ? "sales" : "pa";
+	const now = Date.now();
+	if (whipAt[bot] && now - whipAt[bot] < WHIP_GAP) {
+		send("say", JSON.stringify({ name, text: "Iya iya, lagi dikebut! 😵" }));
+		return;
+	}
+	whipAt[bot] = now;
+	send("say", JSON.stringify({ name, text: "Siap, gas! 🏃" }));
+	if (isSales) salesSend(WHIP_SALES, "⚡ CETAS! (minta cepat)");
+	else paSend(name, WHIP_PA, "⚡ CETAS! (minta cepat)");
 };
 async function paOnReply(p) {
 	if (!p) return;
+	let role = paBusyChar || paRole;
 	if (pa.pending[p.id]) {
-		clearTimeout(pa.pending[p.id]);
+		role = pa.pending[p.id].role;
+		clearTimeout(pa.pending[p.id].timer);
 		delete pa.pending[p.id];
 	} else if (!(p.late && paCan())) return;  // balasan terlambat: dibuka hanya bila memang untuk kita
 	try {
 		const d = await salesApi({ open: p.box, bot: "pa" });
-		paLog("Onel", d.reply);
+		paLog(role, d.reply);
 		const short = d.reply.length > 120 ? d.reply.slice(0, 117) + "..." : d.reply;
-		send("say", JSON.stringify({ name: PA_CHAR, text: short }));
+		send("say", JSON.stringify({ name: role, text: short }));
 	} catch (err) {
-		paLog("Onel", "(balasan tidak bisa dibuka: " + err.message + ")", "me");
+		paLog(role, "(balasan tidak bisa dibuka: " + err.message + ")", "me");
 	}
 }
 function paOnStatus(p) {
 	if (!p) return;
 	pa.online = true;
 	pa.status = p.text || "";
-	send("ext", JSON.stringify({ name: PA_CHAR, text: p.busy ? p.text : "", ttl: 200 }));
+	const who = paBusyChar || paRole;
+	send("ext", JSON.stringify({ name: who, text: p.busy ? p.text : "", ttl: 200 }));
+	if (!p.busy) paBusyChar = "";
 	paRefresh();
 }
 window.ovNetSend = function (json) {
@@ -1230,7 +1292,7 @@ async function netStart() {
 				netSetOnline(keys);
 				if (paBot !== pa.online) {
 					pa.online = paBot;
-					if (!paBot) send("ext", JSON.stringify({ name: PA_CHAR, text: "", ttl: 0 }));
+					if (!paBot) for (const r of Object.keys(PA_ROLES)) send("ext", JSON.stringify({ name: r, text: "", ttl: 0 }));
 					paRefresh();
 				}
 				if (bot !== sales.online) {
@@ -1400,7 +1462,7 @@ window.ovUpdate = function (s) {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1906624,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1906864,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
