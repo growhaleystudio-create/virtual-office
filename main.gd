@@ -43,7 +43,7 @@ const WORK_TASKS := ["menulis laporan", "cek email", "follow up lead", "analisa 
 const AGENTS := [
 	["Sales", Color(0.86, 0.32, 0.26), Color(0.25, 0.15, 0.08), "Sales Sawit (AI)"],
 	["Marketing", Color(0.25, 0.52, 0.86), Color(0.55, 0.30, 0.12), "Marketing Specialist"],
-	["Admin", Color(0.35, 0.70, 0.38), Color(0.12, 0.10, 0.10), "Staf Administrasi"],
+	["Admin", Color(0.35, 0.70, 0.38), Color(0.12, 0.10, 0.10), "Onel PA (AI asisten)"],
 	["Support", Color(0.95, 0.72, 0.22), Color(0.70, 0.45, 0.20), "Customer Support"],
 	["Finance", Color(0.62, 0.40, 0.80), Color(0.20, 0.12, 0.08), "Staf Keuangan"],
 	["Developer", Color(0.22, 0.66, 0.66), Color(0.40, 0.22, 0.10), "Software Developer"],
@@ -2014,7 +2014,7 @@ func show_feedback(text: String) -> void:
 func _build_bridge() -> void:
 	if OS.has_feature("web"):
 		# versi web (online): karakter jalan sebagai NPC otomatis, tanpa relay AI di laptop
-		bridge_label.text = "Online · Sales = AI, lainnya NPC"
+		bridge_label.text = "Online · Sales & Admin = AI, lainnya NPC"
 		return
 	bridge = Bridge.new()
 	bridge.main = self

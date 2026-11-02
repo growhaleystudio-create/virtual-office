@@ -8,5 +8,6 @@ module.exports = (req, res) => {
 	res.setHeader("Cache-Control", "no-store");
 	// founder yang boleh ngobrol dengan Sales Sawit (karyawan AI), lihat api/sales.js
 	const sales = (process.env.SALES_FOUNDERS || "angga").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-	res.end(JSON.stringify(url && key ? { url, key, sales } : { sales }));
+	const pa = (process.env.PA_FOUNDERS || "angga").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	res.end(JSON.stringify(url && key ? { url, key, sales, pa } : { sales, pa }));
 };

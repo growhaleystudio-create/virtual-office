@@ -284,7 +284,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--line);
 .about a { color: var(--blue-l); font-weight: 700; text-decoration: none; }
 #sales-on { color: #3fbf6f; font-weight: 600; }
 #sales-on.off { color: var(--muted); font-weight: 400; }
-#sales-log:empty { display: none; }
+#sales-log:empty, #pa-log:empty { display: none; }
+#pa-on { color: #3fbf6f; font-weight: 600; }
+#pa-on.off { color: var(--muted); font-weight: 400; }
+#pa-log > div { white-space: pre-wrap; }
+body:not(.is-pa-owner) .pa-owner-only { display: none !important; }
 .chat-log .me { color: var(--muted); }
 .about-list { margin: 6px 0 8px; padding-left: 18px; font-size: 12px; line-height: 1.55; color: var(--muted); }
 .about-list li { margin-bottom: 4px; }
@@ -564,6 +568,15 @@ $GODOT_HEAD_INCLUDE
 				<button type="submit" id="sales-go" disabled>Kirim</button>
 			</form>
 		</div>
+		<div class="card pa-owner-only">
+			<h3>Onel PA <span id="pa-on" class="off">offline</span></h3>
+			<p class="meet-info" id="pa-info">Asisten AI dari bot Telegram @Onel_PA_Bot, tampil sebagai karakter Admin.</p>
+			<div class="log chat-log" id="pa-log"></div>
+			<form class="cmd" id="pa-form">
+				<input id="pa" maxlength="1000" placeholder="Khusus pemilik bot" autocomplete="off" disabled>
+				<button type="submit" id="pa-go" disabled>Kirim</button>
+			</form>
+		</div>
 		<div class="card">
 			<h3>Chat Founder <span id="chat-info">realtime</span></h3>
 			<div class="log chat-log" id="chat-log"><div class="chat-empty">Belum ada obrolan. Pesan muncul sebagai balon di atas kepala.</div></div>
@@ -640,6 +653,7 @@ const $ = (id) => document.getElementById(id);
 // keadaan multiplayer (lihat bagian "multiplayer" di bawah)
 // keadaan karyawan AI Sales Sawit (lihat bagian "karyawan AI" di bawah)
 const sales = { online: false, allowed: [], pending: {}, status: "", stats: null };
+const pa = { online: false, allowed: [], pending: {}, status: "" };
 const net = { id: Math.random().toString(36).slice(2, 10), ch: null, ok: false, bc: null, seen: {}, online: [], godot: false, tracked: "" };
 function send(cmd, arg) {
 	if (window.ovCommand) {
@@ -762,6 +776,7 @@ function applyAccount() {
 	netTrack();
 	$("chat").disabled = $("chat-go").disabled = !isFounder();
 	salesRefresh();
+	paRefresh();
 	$("chat").placeholder = isFounder() ? "Tulis pesan (balon di atas kepalamu)" : "Khusus founder, masuk dulu";
 }
 function openLogin() {
@@ -1081,6 +1096,60 @@ function salesOnStatus(p) {
 	send("ext", JSON.stringify({ name: "Sales", text: p.busy ? p.text : "", ttl: 120 }));
 	salesRefresh();
 }
+// ---------- Onel PA: bot Telegram teman lewat userbot di VPS (~/office-pa/pa_link.py) ----------
+// Event "pa_req" / "pa_rep" / "pa_status", presence {bot: "pa"}; API sama: /api/sales {bot: "pa"}.
+const PA_CHAR = "Admin";
+function paCan() { return isFounder() && pa.allowed.includes(session.key); }
+function paRefresh() {
+	document.body.classList.toggle("is-pa-owner", paCan());
+	$("pa-on").textContent = pa.online ? (pa.status || "online") : "offline";
+	$("pa-on").classList.toggle("off", !pa.online);
+	$("pa").disabled = $("pa-go").disabled = !(paCan() && pa.online);
+	$("pa").placeholder = !paCan() ? "Hanya pemilik bot" : !pa.online ? "Perantara di VPS sedang offline" : "Tanya / suruh Onel PA...";
+}
+function paLog(who, text, cls) {
+	const line = el("div", cls || "");
+	line.append(el("b", "", who + ": "), document.createTextNode(text));
+	$("pa-log").append(line);
+	while ($("pa-log").childElementCount > 40) $("pa-log").firstChild.remove();
+	$("pa-log").scrollTop = $("pa-log").scrollHeight;
+}
+$("pa-form").onsubmit = async (e) => {
+	e.preventDefault();
+	const text = $("pa").value.trim();
+	if (!text || !paCan()) return;
+	$("pa").value = "";
+	paLog("Kamu", text, "me");
+	try {
+		const { id } = await salesApi({ text, bot: "pa" });
+		pa.pending[id] = setTimeout(() => {
+			delete pa.pending[id];
+			paLog("Onel", "(tidak ada balasan, cek langsung di Telegram)", "me");
+		}, 200000);
+	} catch (err) {
+		paLog("Onel", "(gagal mengirim: " + err.message + ")", "me");
+	}
+};
+async function paOnReply(p) {
+	if (!p || !pa.pending[p.id]) return;
+	clearTimeout(pa.pending[p.id]);
+	delete pa.pending[p.id];
+	try {
+		const d = await salesApi({ open: p.box, bot: "pa" });
+		paLog("Onel", d.reply);
+		const short = d.reply.length > 120 ? d.reply.slice(0, 117) + "..." : d.reply;
+		send("say", JSON.stringify({ name: PA_CHAR, text: short }));
+	} catch (err) {
+		paLog("Onel", "(balasan tidak bisa dibuka: " + err.message + ")", "me");
+	}
+}
+function paOnStatus(p) {
+	if (!p) return;
+	pa.online = true;
+	pa.status = p.text || "";
+	send("ext", JSON.stringify({ name: PA_CHAR, text: p.busy ? p.text : "", ttl: 200 }));
+	paRefresh();
+}
 window.ovNetSend = function (json) {
 	if (!myNetKey()) return;
 	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "st", payload: { j: json } });
@@ -1132,6 +1201,8 @@ async function netStart() {
 	try { cfg = await (await fetch("/api/net-config", { cache: "no-store" })).json(); } catch (e) {}
 	sales.allowed = cfg.sales || [];
 	salesRefresh();
+	pa.allowed = cfg.pa || [];
+	paRefresh();
 	if (cfg.url && cfg.key) {
 		try {
 			await loadScript(SUPABASE_JS);
@@ -1142,14 +1213,22 @@ async function netStart() {
 			ch.on("broadcast", { event: "chat" }, ({ payload }) => chatShow(payload));
 			ch.on("broadcast", { event: "sales_status" }, ({ payload }) => salesOnStatus(payload));
 			ch.on("broadcast", { event: "sales_rep" }, ({ payload }) => salesOnReply(payload));
+			ch.on("broadcast", { event: "pa_status" }, ({ payload }) => paOnStatus(payload));
+			ch.on("broadcast", { event: "pa_rep" }, ({ payload }) => paOnReply(payload));
 			ch.on("presence", { event: "sync" }, () => {
 				const keys = [];
-				let bot = false;
+				let bot = false, paBot = false;
 				for (const metas of Object.values(ch.presenceState())) for (const m of metas) {
 					if (m.key) keys.push({ k: String(m.key), n: String(m.name || "").slice(0, 20), g: m.g === "m" || m.g === "f" ? m.g : "" });
 					if (m.bot === "sales") bot = true;
+					if (m.bot === "pa") paBot = true;
 				}
 				netSetOnline(keys);
+				if (paBot !== pa.online) {
+					pa.online = paBot;
+					if (!paBot) send("ext", JSON.stringify({ name: PA_CHAR, text: "", ttl: 0 }));
+					paRefresh();
+				}
 				if (bot !== sales.online) {
 					sales.online = bot;
 					if (!bot) send("ext", JSON.stringify({ name: "Sales", text: "", ttl: 0 }));
