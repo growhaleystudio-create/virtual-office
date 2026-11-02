@@ -28,6 +28,8 @@ var plumbob: Node3D
 var activity := ""
 var _arrive_act := ""
 var relaxed := false  # NPC kota: kalau duduk selalu santai, bukan mengetik
+var seat_lift := 0.0  # dudukan lebih tinggi dari kursi biasa (sofa, bean bag): badan dinaikkan
+var _arrive_lift := 0.0
 var _book: Node3D
 var _mug: Node3D
 
@@ -385,10 +387,11 @@ func is_moving() -> bool:
 	return not _path.is_empty()
 
 
-func begin_move(points: Array, kind: String, yaw: float, arrive_status: String, act := "") -> void:
+func begin_move(points: Array, kind: String, yaw: float, arrive_status: String, act := "", lift := 0.0) -> void:
 	stand_up()
 	activity = ""
 	_arrive_act = act
+	_arrive_lift = lift
 	_path = points
 	_arrive_kind = kind
 	_arrive_yaw = yaw
@@ -405,7 +408,7 @@ func net_state() -> Dictionary:
 		path.append([r.call(p.x), r.call(p.y), r.call(p.z)])
 	return {"p": [r.call(position.x), r.call(position.y), r.call(position.z)], "path": path,
 		"kind": _arrive_kind, "ayaw": r.call(_arrive_yaw), "ast": _arrive_status,
-		"yaw": r.call(_face_yaw), "sit": sitting, "st": status, "act": activity, "aact": _arrive_act}
+		"yaw": r.call(_face_yaw), "sit": sitting, "st": status, "act": activity, "aact": _arrive_act, "lift": seat_lift, "alift": _arrive_lift}
 
 
 ## Terapkan keadaan dari pemain lain. Selisih kecil diperhalus (jalan), selisih besar langsung lompat.
@@ -428,6 +431,7 @@ func apply_net_state(s: Dictionary) -> void:
 		_arrive_yaw = float(s.get("ayaw", 0.0))
 		_arrive_status = str(s.get("ast", ""))
 		_arrive_act = str(s.get("aact", ""))
+		_arrive_lift = float(s.get("alift", 0.0))
 		activity = ""
 		stand_up()
 		set_status("berjalan...")
@@ -440,6 +444,7 @@ func apply_net_state(s: Dictionary) -> void:
 		else:
 			stand_up()
 	activity = str(s.get("act", ""))
+	seat_lift = float(s.get("lift", 0.0)) if sitting else 0.0
 	set_status(str(s.get("st", status)))
 
 
@@ -468,6 +473,7 @@ func stop() -> void:
 func stand_up() -> void:
 	sitting = false
 	activity = ""
+	seat_lift = 0.0
 	_rig.position.y = 0.0
 
 
@@ -480,6 +486,7 @@ func _arrive() -> void:
 	_face_yaw = _arrive_yaw
 	if _arrive_kind == "sit":
 		_sit_down()
+		seat_lift = _arrive_lift
 	activity = _arrive_act if _arrive_act != "" else (("relax" if relaxed else "type") if _arrive_kind == "sit" else "")
 	set_status(_arrive_status)
 	think = randf_range(6.0, 10.0)
@@ -566,7 +573,7 @@ func _process(d: float) -> void:
 	_leg_r.rotation.x = lerpf(_leg_r.rotation.x, leg_r, k)
 	_arm_l.rotation.x = lerpf(_arm_l.rotation.x, arm_l, k)
 	_arm_r.rotation.x = lerpf(_arm_r.rotation.x, arm_r, k)
-	_rig.position.y = (SIT_DROP if sitting else 0.0) + bob
+	_rig.position.y = (SIT_DROP + seat_lift if sitting else 0.0) + bob
 	_head.rotation.z = sin(_phase * 0.5) * 0.06 if walking else 0.0
 	_head.rotation.x = lerpf(_head.rotation.x, head_x, k)
 	_update_poke(d)

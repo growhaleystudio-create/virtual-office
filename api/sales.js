@@ -13,6 +13,8 @@ const TOPIC = "growhaley-office";
 const BOTS = {
 	sales: { env: "SALES_FOUNDERS", event: "sales_req", label: "Sales Sawit" },
 	pa: { env: "PA_FOUNDERS", event: "pa_req", label: "Onel PA" },
+	// log kantor (kunjungan tamu): semua founder boleh, dijawab perantara di VPS
+	office: { env: "", event: "office_req", label: "Log kantor", all: true },
 };
 
 function allowedFounders(bot) {
@@ -38,13 +40,19 @@ module.exports = async (req, res) => {
 		if (!who) return send(res, 401, { error: "Sesi founder tidak sah, silakan masuk lagi" });
 		const body = await readJson(req);
 		const bot = BOTS[body.bot] ? body.bot : "sales";
-		if (!allowedFounders(bot).includes(String(who.k).toLowerCase())) {
+		if (!BOTS[bot].all && !allowedFounders(bot).includes(String(who.k).toLowerCase())) {
 			return send(res, 403, { error: BOTS[bot].label + " hanya bisa diajak ngobrol oleh pemiliknya" });
 		}
 		if (body.open) {
 			const d = open(body.open);
 			if (!d || d.to !== who.k) return send(res, 400, { error: "Balasan tidak sah" });
-			return send(res, 200, { id: d.id, reply: d.reply || "", note: d.note || "", files: d.files || null, file: d.file || null });
+			return send(res, 200, { id: d.id, reply: d.reply || "", note: d.note || "", files: d.files || null, file: d.file || null, visits: d.visits || null, stats: d.stats || null });
+		}
+		if (bot === "office") {
+			if (body.op !== "visits") return send(res, 400, { error: "Permintaan tidak dikenal" });
+			const id = crypto.randomBytes(8).toString("hex");
+			await broadcast("office_req", { id, box: seal({ id, bot, op: "visits", from: who.k, name: who.n, ts: Date.now() }) });
+			return send(res, 200, { id });
 		}
 		if (bot === "pa" && body.op === "files") {
 			// daftar Hasil Kerja (dijawab perantara di VPS, terenkripsi untuk founder ini)

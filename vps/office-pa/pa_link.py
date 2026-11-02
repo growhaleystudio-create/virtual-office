@@ -29,6 +29,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import office_log
+
 from telethon import TelegramClient, events
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -363,6 +365,50 @@ def _describe(m) -> str:
 _seen = {}
 
 
+# ---------- log tamu (presence channel -> SQLite, lihat office_log.py) ----------
+_presence = {}  # presence key -> list meta
+
+
+def _presence_apply(event, payload):
+    if event == "presence_state":
+        _presence.clear()
+        for k, v in (payload or {}).items():
+            _presence[k] = list(v.get("metas", []))
+    else:
+        for k, v in ((payload or {}).get("joins") or {}).items():
+            _presence.setdefault(k, []).extend(v.get("metas", []))
+        for k, v in ((payload or {}).get("leaves") or {}).items():
+            refs = {m.get("phx_ref") for m in v.get("metas", [])}
+            left = [m for m in _presence.get(k, []) if m.get("phx_ref") not in refs]
+            if left:
+                _presence[k] = left
+            else:
+                _presence.pop(k, None)
+    guests = {}
+    for metas in _presence.values():
+        for m in metas:
+            key = str(m.get("key", ""))
+            if key.startswith("g:"):
+                guests[key] = (str(m.get("name", "Tamu"))[:20], str(m.get("g", ""))[:1])
+    try:
+        office_log.sync(guests)
+    except Exception:  # noqa: BLE001
+        log.exception("log tamu gagal")
+
+
+async def handle_office(payload):
+    """Permintaan founder (semua founder boleh): op "visits" = log kunjungan tamu."""
+    d = unseal(payload.get("box", ""))
+    if not d or d.get("bot") != "office" or not d.get("id"):
+        return
+    if abs(time.time() * 1000 - float(d.get("ts", 0))) > 120_000 or d["id"] in _seen:
+        return
+    _seen[d["id"]] = time.time()
+    if d.get("op") == "visits":
+        visits, stats = office_log.recent()
+        await broadcast("office_rep", {"id": d["id"], "box": seal({"id": d["id"], "to": d.get("from"), "visits": visits, "stats": stats})})
+
+
 async def handle_req(pa: PA, payload):
     d = unseal(payload.get("box", ""))
     if not d or not d.get("id") or not (d.get("text") or d.get("op")):
@@ -423,6 +469,7 @@ async def supabase_loop(pa: PA):
                     while True:
                         await asyncio.sleep(25)
                         await push("phoenix", "heartbeat", {})
+                        _presence_apply("tick", None)  # perbarui "terakhir terlihat" tamu yang masih ada
 
                 hb = asyncio.create_task(heartbeat())
                 log.info("tersambung ke Supabase")
@@ -431,12 +478,17 @@ async def supabase_loop(pa: PA):
                 try:
                     async for raw in ws:
                         m = json.loads(raw)
+                        if m.get("event") in ("presence_state", "presence_diff"):
+                            _presence_apply(m["event"], m.get("payload"))
+                            continue
                         if m.get("event") != "broadcast":
                             continue
                         p = m.get("payload") or {}
                         ev = p.get("event")
                         if ev == "pa_req":
                             asyncio.create_task(handle_req(pa, p.get("payload") or {}))
+                        elif ev == "office_req":
+                            asyncio.create_task(handle_office(p.get("payload") or {}))
                         elif ev == "hello":
                             asyncio.create_task(set_status(_status["text"], _status["busy"]))
                 finally:
@@ -454,6 +506,7 @@ async def main():
     for k in ("OFFICE_LINK_SECRET", "SUPABASE_URL", "SUPABASE_KEY", "TG_API_ID", "TG_API_HASH"):
         if not os.getenv(k):
             raise SystemExit(f"env {k} belum diisi")
+    office_log.init()
     pa = PA()
     await pa.start()
     await ensure_bucket()

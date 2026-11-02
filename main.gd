@@ -513,9 +513,10 @@ func _act_for(place: String, kind: String) -> String:
 	return ""
 
 
-func _add_spot(place: String, cell: Vector2i, kind: String, yaw_: float, approach := NONE, shift := 0.2, act := "") -> void:
+## lift: dudukan lebih tinggi dari kursi biasa (sofa 0.14, bean bag 0.12) supaya karakter tidak tenggelam.
+func _add_spot(place: String, cell: Vector2i, kind: String, yaw_: float, approach := NONE, shift := 0.2, act := "", lift := 0.0) -> void:
 	var s := {"cell": cell, "floor": cf, "kind": kind, "yaw": yaw_, "approach": approach, "shift": shift,
-		"act": act if act != "" else _act_for(place, kind)}
+		"act": act if act != "" else _act_for(place, kind), "lift": lift}
 	if place == "desk":
 		desk_spots.append(s)
 	else:
@@ -598,7 +599,7 @@ func _beanbag(cell: Vector2i, yaw_: float, place: String, color: Color) -> void:
 	var p := _cw(cell)
 	_cyl(Vector3(p.x, 0.22, p.z), 0.5, 0.44, color, "cloth")
 	_cyl(Vector3(p.x, 0.5, p.z), 0.36, 0.2, color.lightened(0.1), "cloth")
-	_add_spot(place, cell, "sit", yaw_, NONE, 0.0)
+	_add_spot(place, cell, "sit", yaw_, NONE, 0.0, "", 0.12)
 
 
 func _round_table(tx: int, tz: int, place: String, chair_col: Color) -> void:
@@ -946,8 +947,8 @@ func _build_lounge() -> void:
 	_solid(17, 27, 4, 1)
 	_sofa(_rect_center(17, 27, 4, 1), 4.0, PI, Color(0.80, 0.50, 0.38))
 	for x in range(17, 21):
-		_add_spot("lounge", Vector2i(x, 22), "sit", 0.0, Vector2i(x, 23), 0.0)
-		_add_spot("lounge", Vector2i(x, 27), "sit", PI, Vector2i(x, 26), 0.0)
+		_add_spot("lounge", Vector2i(x, 22), "sit", 0.0, Vector2i(x, 23), SOFA_SHIFT, "", SOFA_LIFT)
+		_add_spot("lounge", Vector2i(x, 27), "sit", PI, Vector2i(x, 26), SOFA_SHIFT, "", SOFA_LIFT)
 	_solid(18, 24, 2, 2)
 	var tc := _rect_center(18, 24, 2, 2)
 	_box(Vector3(tc.x, 0.3, tc.z), Vector3(1.8, 0.08, 1.2), WOOD, "planks", 1.0)
@@ -981,7 +982,7 @@ func _build_lobby() -> void:
 	_solid(0, 20, 1, 4)
 	_sofa(_rect_center(0, 20, 1, 4), 4.0, PI / 2, BRAND_BLUE)
 	for z in range(20, 24):
-		_add_spot("lobby", Vector2i(0, z), "sit", PI / 2, Vector2i(1, z), 0.0)
+		_add_spot("lobby", Vector2i(0, z), "sit", PI / 2, Vector2i(1, z), SOFA_SHIFT, "", SOFA_LIFT)
 	_plant(11, 19)
 	_plant(11, 29)
 	_plant(0, 29)
@@ -1114,6 +1115,8 @@ func _build_my_office() -> void:
 	# sofa & meja tamu
 	_solid(0, 8, 1, 4)
 	_sofa(_rect_center(0, 8, 1, 4), 4.0, PI / 2, BRAND_INK.lightened(0.15))
+	for z in range(8, 12):
+		_add_spot("_extra", Vector2i(0, z), "sit", PI / 2, Vector2i(1, z), SOFA_SHIFT, "relax", SOFA_LIFT)
 	_solid(2, 9, 2, 2)
 	var tc := _rect_center(2, 9, 2, 2)
 	_box(Vector3(tc.x, 0.35, tc.z), Vector3(1.4, 0.08, 1.4), mahogany, "planks", 1.0)
@@ -1606,7 +1609,7 @@ func _build_floor2() -> void:
 	_solid(30, 14, 1, 3)
 	_sofa(_rect_center(30, 14, 1, 3), 3.0, PI / 2, BRAND_PINK)
 	for z in range(14, 17):
-		_add_spot("_extra", Vector2i(30, z), "sit", PI / 2, Vector2i(31, z), 0.0, "relax")
+		_add_spot("_extra", Vector2i(30, z), "sit", PI / 2, Vector2i(31, z), SOFA_SHIFT, "relax", SOFA_LIFT)
 	_solid(32, 15, 2, 1)
 	var tc := _rect_center(32, 15, 2, 1)
 	_box(Vector3(tc.x, 0.35, tc.z), Vector3(1.6, 0.08, 0.8), Color(0.95, 0.95, 0.96), "stone")
@@ -1947,7 +1950,7 @@ func send(a: Agent, spot: Dictionary, arrive_status: String) -> bool:
 			pts[pts.size() - 1] = p
 	a.dest_cell = spot["cell"]
 	a.dest_floor = tf
-	a.begin_move(pts, spot["kind"], yaw_, arrive_status, spot.get("act", ""))
+	a.begin_move(pts, spot["kind"], yaw_, arrive_status, spot.get("act", ""), spot.get("lift", 0.0))
 	return true
 
 
@@ -3151,6 +3154,8 @@ var _walk_keys := false
 var _idle_t := 0.0  # berapa lama karakter sendiri diam (untuk duduk / beraktivitas otomatis)
 var _skip_spot := {}  # tempat yang baru ditinggalkan: jangan langsung duduk lagi di situ
 
+const SOFA_SHIFT := 0.12  # duduk sedikit maju dari tengah sofa (menjauhi sandaran)
+const SOFA_LIFT := 0.14  # dudukan sofa 0.61 m vs kursi 0.47 m
 const ACT_STATUS := {"type": "mengetik", "relax": "santai", "read": "membaca buku", "coffee": "bikin kopi"}
 var _on_stairs := false  # sedang naik/turun tangga hasil WASD: input diabaikan sampai tiba
 var _pad := Vector2.ZERO  # tombol panah di layar HP (dari halaman web, cmd "move")
@@ -3405,7 +3410,7 @@ func _auto_interact(d: float) -> void:
 		act = "type"
 	me.dest_cell = best["cell"]
 	me.dest_floor = f
-	me.begin_move(path, best["kind"], best["yaw"], ACT_STATUS.get(act, "diam"), act)
+	me.begin_move(path, best["kind"], best["yaw"], ACT_STATUS.get(act, "diam"), act, best.get("lift", 0.0))
 	_skip_spot = {"pos": p}  # setelah berdiri nanti, tempat ini dilewati sampai menjauh
 	_net_send()
 

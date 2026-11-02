@@ -5,3 +5,4 @@
 bridge.cfg
 bridge/.venv/
 __pycache__/
+visits.db
