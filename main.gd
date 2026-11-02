@@ -2392,6 +2392,11 @@ func _update_tooltip() -> void:
 ## Cetas! pecut melecut, balon komik muncul di atas kepala karakter.
 func whip(a: Agent) -> void:
 	_crack_t = CRACK_TIME
+	# di web: pecut karyawan AI = suruh bot-nya cepat (halaman yang memutuskan boleh/tidak)
+	if OS.has_feature("web") and a in agents:
+		var win := JavaScriptBridge.get_interface("window")
+		if win and win.ovWhip:
+			win.ovWhip(a.agent_name)
 	await get_tree().create_timer(0.14).timeout  # tepat saat pecut menghentak
 	a.poke()
 	var head := a.global_position + Vector3(0, 2.1, 0)

@@ -1081,8 +1081,11 @@ $("sales-form").onsubmit = async (e) => {
 	const text = $("sales").value.trim();
 	if (!text || !salesCan()) return;
 	$("sales").value = "";
-	salesLog("Kamu", text, "me");
-	send("chat", JSON.stringify({ k: session.key, text }));
+	salesSend(text, text);
+};
+async function salesSend(text, shown) {
+	salesLog("Kamu", shown, "me");
+	send("chat", JSON.stringify({ k: session.key, text: shown }));
 	try {
 		const { id } = await salesApi({ text });
 		sales.pending[id] = setTimeout(() => {
@@ -1092,7 +1095,7 @@ $("sales-form").onsubmit = async (e) => {
 	} catch (err) {
 		salesLog("Sales", "(gagal mengirim: " + err.message + ")", "me");
 	}
-};
+}
 async function salesOnReply(p) {
 	if (!p || !sales.pending[p.id]) return;
 	clearTimeout(sales.pending[p.id]);
@@ -1146,8 +1149,10 @@ $("pa-form").onsubmit = async (e) => {
 	const text = $("pa").value.trim();
 	if (!text || !paCan()) return;
 	$("pa").value = "";
-	const role = paRole;
-	paLog("Kamu → " + role, text, "me");
+	paSend(paRole, text, text);
+};
+async function paSend(role, text, shown) {
+	paLog("Kamu → " + role, shown, "me");
 	paBusyChar = role;
 	try {
 		const { id } = await salesApi({ text: "[Kantor virtual Growhaley · kamu sebagai staf " + PA_ROLES[role].tag + "] " + text, bot: "pa" });
@@ -1158,6 +1163,30 @@ $("pa-form").onsubmit = async (e) => {
 	} catch (err) {
 		paLog(role, "(gagal mengirim: " + err.message + ")", "me");
 	}
+}
+// ---------- pecut "CETAS!" = suruh karyawan AI cepat ----------
+// Godot memanggil window.ovWhip(nama) saat karakter dipecut. Hanya pemilik bot yang bisa;
+// jeda 30 dtk per bot supaya pecutan beruntun tidak membanjiri bot.
+const WHIP_GAP = 30000;
+const whipAt = {};
+const WHIP_SALES = "⚡ CETAS! Founder minta cepat: percepat kerjaan yang lagi jalan dan kasih update singkat progresnya sekarang (sudah sampai mana, sisa apa, kira-kira kapan beres).";
+const WHIP_PA = "⚡ CETAS! Founder minta cepat: percepat tugas yang sedang kamu kerjakan, lalu kirim update singkat sekarang: sudah sampai mana, sisa apa, kapan selesai. Kalau tidak ada tugas berjalan, bilang saja siap menerima tugas.";
+window.ovWhip = function (name) {
+	const isSales = name === "Sales";
+	const isPa = !!PA_ROLES[name];
+	if (!isSales && !isPa) return;  // NPC biasa: cuma efek
+	const can = isSales ? salesCan() && sales.online : paCan() && pa.online;
+	if (!can) return;
+	const bot = isSales ? "sales" : "pa";
+	const now = Date.now();
+	if (whipAt[bot] && now - whipAt[bot] < WHIP_GAP) {
+		send("say", JSON.stringify({ name, text: "Iya iya, lagi dikebut! 😵" }));
+		return;
+	}
+	whipAt[bot] = now;
+	send("say", JSON.stringify({ name, text: "Siap, gas! 🏃" }));
+	if (isSales) salesSend(WHIP_SALES, "⚡ CETAS! (minta cepat)");
+	else paSend(name, WHIP_PA, "⚡ CETAS! (minta cepat)");
 };
 async function paOnReply(p) {
 	if (!p) return;
