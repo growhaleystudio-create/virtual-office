@@ -822,6 +822,7 @@ function el(tag, cls, text) {
 // panel founder: yang online (multiplayer) ditandai hijau + posisinya; klik = kamera ikut dia
 const founderRows = {};
 let founderWhere = {};
+const mrooms = {}; // peserta call per ruang (diisi dari siaran "mroom")
 for (const [name, role, key] of FOUNDERS) {
 	const r = el("div", "row founder");
 	const img = el("img");
@@ -835,6 +836,13 @@ for (const [name, role, key] of FOUNDERS) {
 	$("founders").append(r);
 	founderRows[key] = r;
 }
+let lastMeRoom = "";
+function setMeRoom(r) {
+	lastMeRoom = r;
+	const mt = session ? meetingOf(session.key) : "";
+	const t = mt ? "Lagi meeting · " + mt : r;
+	if ($("me-room").textContent !== t) $("me-room").textContent = t;
+}
 function renderFounders(where) {
 	founderWhere = where || {};
 	let n = 0;
@@ -843,7 +851,8 @@ function renderFounders(where) {
 		const on = key in founderWhere;
 		n += on ? 1 : 0;
 		const you = isFounder() && session.key === key;
-		const txt = on ? (you ? "kamu · " : "online · ") + founderWhere[key] : "offline · di ruangannya";
+		const mt = on ? meetingOf(key) : "";
+		const txt = on ? (you ? "kamu · " : "online · ") + (mt ? "lagi meeting · " + mt : founderWhere[key]) : "offline · di ruangannya";
 		if (r.net.textContent !== txt) r.net.textContent = txt;
 		r.classList.toggle("online", on);
 	}
@@ -1253,19 +1262,22 @@ function onMeetRoom(name) {
 $("meet-cta").onclick = joinCall;
 $("join-meet").onclick = joinCall;
 // info siapa yang sedang call di tiap ruang: tiap peserta menyiarkan "mroom" (detak 10 dtk, kedaluwarsa 25 dtk)
-const mrooms = {};
 function mroomSend(on) {
 	if (!session) return;
-	const payload = { id: net.id, room: rtc.room, name: session.name, on };
+	const payload = { id: net.id, room: rtc.room, name: session.name, k: session.key, on };
 	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "mroom", payload });
 	else if (net.bc) net.bc.postMessage({ t: "mroom", m: payload });
 	mroomOn(payload);
 }
 function mroomOn(p) {
 	if (!p || !p.id || !p.room) return;
-	if (p.on) mrooms[p.id] = { room: String(p.room), name: String(p.name || "").slice(0, 20), at: Date.now() };
+	if (p.on) mrooms[p.id] = { room: String(p.room), name: String(p.name || "").slice(0, 20), k: String(p.k || ""), at: Date.now() };
 	else delete mrooms[p.id];
 	mroomRender();
+}
+function meetingOf(key) {
+	for (const v of Object.values(mrooms)) if (v.k === key) return v.room;
+	return "";
 }
 function mroomRender() {
 	const now = Date.now();
@@ -1275,6 +1287,8 @@ function mroomRender() {
 		row.classList.toggle("live", names.length > 0);
 		row.querySelector(".who").textContent = names.length ? names.length + " di call: " + names.join(", ") : "Kosong";
 	}
+	if (typeof founderWhere === "object") renderFounders(founderWhere);
+	if (lastMeRoom) setMeRoom(lastMeRoom);
 }
 for (const row of document.querySelectorAll("#meet-rooms .mr")) {
 	row.querySelector("button").onclick = () => { send("goto", row.dataset.goto); toGame(); };
@@ -2019,7 +2033,7 @@ window.ovUpdate = function (s) {
 	}
 	renderFounders(s.founders);
 	onMeetRoom(s.meeting || "");
-	if (s.me_room) $("me-room").textContent = s.me_room;
+	if (s.me_room) setMeRoom(s.me_room);
 	if (!detailSynced) {
 		detailSynced = true;
 		if ((detailPref === "1") !== s.detail) send("detail", detailPref);
