@@ -367,7 +367,7 @@ body.immersive #dpad [data-d="l"], body.immersive #dpad [data-d="r"] { top: 44px
 .chat-log b { color: var(--blue-l); font-weight: 600; }
 .chat-log .chat-empty { color: var(--muted); }
 .log { max-height: 120px; overflow-y: auto; font-size: 12px; color: var(--muted); line-height: 1.6; }
-/* video meeting (Daily) */
+/* video meeting (WebRTC) */
 .meet-cta {
 	position: absolute;
 	left: 50%;
@@ -408,7 +408,12 @@ body.in-call #call { display: flex; }
 #call .bar b.warn { color: #ffcf6e; }
 #call .bar button { flex: none; padding: 5px 10px; font-size: 12px; }
 #call .bar button.leave { background: #c0392b; border-color: #c0392b; }
-#call iframe { flex: 1; width: 100%; border: 0; background: #111; }
+#call .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px; padding: 6px; overflow: auto; background: #111; align-content: center; }
+#call .tile { position: relative; background: #1d1d22; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; }
+#call .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+#call .tile.me video { transform: scaleX(-1); }
+#call .tile .nm { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#call .bar button.off { background: #6b2a2a; border-color: #8a3a3a; }
 @media (max-width: 760px) {
 	#call, #call.big { right: 0; left: 0; bottom: 0; width: 100%; height: 58dvh; border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 	#call.mini { height: calc(46px + env(safe-area-inset-bottom)); }
@@ -752,10 +757,13 @@ body.in-call #call { display: flex; }
 <div id="call" role="dialog" aria-label="Video meeting">
 	<div class="bar">
 		<b id="call-title">Video Meeting</b>
+		<button id="call-mic" title="Mikrofon">Mik</button>
+		<button id="call-cam" title="Kamera">Kamera</button>
 		<button class="size" id="call-size" title="Perbesar / perkecil">Besar</button>
 		<button id="call-mini" title="Lipat / buka">Lipat</button>
 		<button class="leave" id="call-leave">Keluar</button>
 	</div>
+	<div class="grid" id="call-grid"></div>
 </div>
 
 <script>
@@ -995,29 +1003,140 @@ function syncFounder() {
 }
 $("me-row").onclick = () => { send("me"); toGame(); };
 
-// ---------- video meeting (Daily Prebuilt) ----------
+// ---------- video meeting (WebRTC antar founder, sinyal lewat Supabase) ----------
 // Hanya bisa dibuka saat kamera ada di ruang meeting; keluar ruangan -> call ditutup setelah hitung mundur.
+// Mesh: tiap founder terhubung langsung ke yang lain (cocok untuk <= 6 orang). Sinyal "rtc" dienkripsi
+// AES-GCM dengan kunci dari /api/meeting (hanya founder login) -> tamu tak bisa menyadap/memalsukan.
 const LEAVE_GRACE = 8;
 let meetRoom = "";
 let inCall = false;
 let leaveTimer = null;
 let leaveLeft = 0;
+const rtc = { key: null, ice: [], local: null, peers: {}, room: "", joining: false };
+function b64(buf) { let s = ""; for (const x of new Uint8Array(buf)) s += String.fromCharCode(x); return btoa(s); }
+function unb64(s) { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
+async function rtcEnc(obj) {
+	const iv = crypto.getRandomValues(new Uint8Array(12));
+	const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, rtc.key, new TextEncoder().encode(JSON.stringify(obj)));
+	return { i: b64(iv), c: b64(ct) };
+}
+async function rtcDec(e) {
+	try {
+		const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(e.i) }, rtc.key, unb64(e.c));
+		return JSON.parse(new TextDecoder().decode(pt));
+	} catch (err) { return null; }
+}
+async function rtcSend(to, inner) {
+	if (!rtc.key) return;
+	inner.from = net.id; inner.room = rtc.room; inner.n = session ? session.name : "";
+	const payload = { to: to || "", e: await rtcEnc(inner) };
+	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "rtc", payload });
+	else if (net.bc) net.bc.postMessage({ t: "rtc", m: payload });
+}
+function rtcTile(id, name, me) {
+	const t = el("div", "tile" + (me ? " me" : ""));
+	const v = document.createElement("video");
+	v.autoplay = true; v.playsInline = true; v.muted = !!me;
+	t.append(v, el("span", "nm", name || "Founder"));
+	t.dataset.id = id;
+	$("call-grid").append(t);
+	return v;
+}
+function rtcCount() { return 1 + Object.keys(rtc.peers).length; }
+function rtcGathered(pc) {
+	return new Promise((ok) => {
+		if (pc.iceGatheringState === "complete") return ok();
+		const done = () => { pc.removeEventListener("icegatheringstatechange", chk); ok(); };
+		const chk = () => pc.iceGatheringState === "complete" && done();
+		pc.addEventListener("icegatheringstatechange", chk);
+		setTimeout(done, 3000);
+	});
+}
+function rtcDrop(id) {
+	const p = rtc.peers[id];
+	if (!p) return;
+	delete rtc.peers[id];
+	clearTimeout(p.t);
+	try { p.pc.close(); } catch (e) {}
+	const tile = $("call-grid").querySelector('.tile[data-id="' + id + '"]');
+	if (tile) tile.remove();
+	setCallTitle();
+}
+function rtcPeer(id, name) {
+	if (rtc.peers[id]) return rtc.peers[id];
+	const pc = new RTCPeerConnection({ iceServers: rtc.ice });
+	const video = rtcTile(id, name, false);
+	const p = { id, pc, video, t: 0 };
+	for (const tr of rtc.local.getTracks()) pc.addTrack(tr, rtc.local);
+	pc.ontrack = (e) => { if (e.streams[0]) video.srcObject = e.streams[0]; };
+	pc.onconnectionstatechange = () => {
+		clearTimeout(p.t);
+		const s = pc.connectionState;
+		if (s === "failed" || s === "closed") rtcDrop(id);
+		else if (s === "disconnected") p.t = setTimeout(() => rtc.peers[id] === p && rtcDrop(id), 8000);
+	};
+	rtc.peers[id] = p;
+	setCallTitle();
+	return p;
+}
+async function rtcOffer(id, name) {
+	const p = rtcPeer(id, name);
+	for (const kind of ["audio", "video"]) {
+		if (!rtc.local.getTracks().some((t) => t.kind === kind)) p.pc.addTransceiver(kind, { direction: "recvonly" });
+	}
+	await p.pc.setLocalDescription(await p.pc.createOffer());
+	await rtcGathered(p.pc);
+	rtcSend(id, { t: "offer", sdp: p.pc.localDescription.sdp });
+}
+async function rtcOn(payload) {
+	if (!rtc.key || !payload || !payload.e || (payload.to && payload.to !== net.id)) return;
+	const m = await rtcDec(payload.e);
+	if (!m || m.room !== rtc.room || !m.from || m.from === net.id || !rtc.key) return;
+	try {
+		if (m.t === "join") {
+			rtcDrop(m.from);
+			rtcSend(m.from, { t: "here" });
+			if (net.id < m.from) rtcOffer(m.from, m.n);
+		} else if (m.t === "here") {
+			if (!rtc.peers[m.from] && net.id < m.from) rtcOffer(m.from, m.n);
+		} else if (m.t === "offer") {
+			const p = rtcPeer(m.from, m.n);
+			await p.pc.setRemoteDescription({ type: "offer", sdp: m.sdp });
+			await p.pc.setLocalDescription(await p.pc.createAnswer());
+			await rtcGathered(p.pc);
+			rtcSend(m.from, { t: "answer", sdp: p.pc.localDescription.sdp });
+		} else if (m.t === "answer") {
+			const p = rtc.peers[m.from];
+			if (p && p.pc.signalingState === "have-local-offer") await p.pc.setRemoteDescription({ type: "answer", sdp: m.sdp });
+		} else if (m.t === "leave") rtcDrop(m.from);
+	} catch (err) { console.warn("rtc", m.t, err); }
+}
 function setCallTitle() {
 	const t = $("call-title");
 	if (leaveTimer) {
 		t.textContent = "Keluar ruangan, call ditutup dalam " + leaveLeft + " dtk";
 		t.className = "warn";
 	} else {
-		t.textContent = "Video Meeting · " + (meetRoom || "Ruang Meeting");
+		t.textContent = "Video Meeting · " + (meetRoom || rtc.room || "Ruang Meeting") + " · " + rtcCount() + " orang";
 		t.className = "";
 	}
 }
+function setCallBtn(id, label, on) {
+	$(id).textContent = label + (on ? "" : " mati");
+	$(id).classList.toggle("off", !on);
+}
 async function joinCall() {
-	if (!meetRoom || inCall || !isFounder()) return;
+	if (!meetRoom || inCall || rtc.joining || !isFounder()) return;
+	if (!(net.ch && net.ok) && !net.bc) {
+		$("meet-info").textContent = "Koneksi realtime belum siap, coba lagi sebentar lagi.";
+		return;
+	}
+	rtc.joining = true;
 	$("join-meet").disabled = true;
 	$("meet-info").textContent = "Menyiapkan ruang meeting...";
-	let url = "";
+	let key, ice;
 	try {
+		if (!window.RTCPeerConnection || !navigator.mediaDevices) throw new Error("Browser ini tidak mendukung video call");
 		const r = await fetch("/api/meeting", { method: "POST", headers: { Authorization: "Bearer " + session.token } });
 		const d = await r.json().catch(() => ({}));
 		if (r.status === 401) {
@@ -1028,31 +1147,67 @@ async function joinCall() {
 			throw new Error("Sesi habis, silakan masuk lagi.");
 		}
 		if (!r.ok) throw new Error(d.error || ("Gagal (" + r.status + ")"));
-		url = d.url;
+		key = await crypto.subtle.importKey("raw", unb64(d.key), "AES-GCM", false, ["encrypt", "decrypt"]);
+		ice = d.ice || [];
 	} catch (err) {
 		$("meet-info").textContent = "Tidak bisa membuka meeting: " + err.message;
+		rtc.joining = false;
 		$("join-meet").disabled = !meetRoom;
 		return;
 	}
-	if (!meetRoom) return;
-	const f = document.createElement("iframe");
-	f.allow = "camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-write";
-	f.src = url;
-	$("call").append(f);
-	$("call").classList.remove("mini");
+	let stream = null;
+	let note = "";
+	try {
+		stream = await navigator.mediaDevices.getUserMedia({
+			audio: { echoCancellation: true, noiseSuppression: true },
+			video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } },
+		});
+	} catch (e1) {
+		try {
+			stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			note = "Kamera tidak tersedia/ditolak, masuk hanya dengan suara.";
+		} catch (e2) {
+			stream = new MediaStream();
+			note = "Kamera & mikrofon tidak diizinkan, kamu hanya bisa melihat/mendengar.";
+		}
+	}
+	rtc.joining = false;
+	if (!meetRoom) { stream.getTracks().forEach((t) => t.stop()); refreshMeet(); return; }
+	rtc.key = key; rtc.ice = ice; rtc.local = stream; rtc.room = meetRoom;
+	$("call-grid").textContent = "";
+	rtcTile("me", session ? session.name : "Kamu", true).srcObject = stream;
 	inCall = true;
+	$("call").classList.remove("mini");
 	document.body.classList.add("in-call");
+	setCallBtn("call-mic", "Mik", stream.getAudioTracks().length > 0);
+	setCallBtn("call-cam", "Kamera", stream.getVideoTracks().length > 0);
 	setCallTitle();
+	if (note) $("meet-info").textContent = note;
+	rtcSend("", { t: "join" });
 }
 function leaveCall() {
-	const f = document.querySelector("#call iframe");
-	if (f) f.remove();
+	if (rtc.key) rtcSend("", { t: "leave" });
+	for (const id of Object.keys(rtc.peers)) rtcDrop(id);
+	if (rtc.local) rtc.local.getTracks().forEach((t) => t.stop());
+	rtc.local = null; rtc.key = null; rtc.room = "";
+	$("call-grid").textContent = "";
 	inCall = false;
 	document.body.classList.remove("in-call");
 	clearInterval(leaveTimer);
 	leaveTimer = null;
 	$("canvas").focus();
 }
+addEventListener("pagehide", () => inCall && leaveCall());
+function toggleTrack(kind, btn, label) {
+	if (!rtc.local) return;
+	const tr = kind === "audio" ? rtc.local.getAudioTracks() : rtc.local.getVideoTracks();
+	if (!tr.length) return;
+	const on = !tr[0].enabled;
+	tr.forEach((t) => (t.enabled = on));
+	setCallBtn(btn, label, on);
+}
+$("call-mic").onclick = () => toggleTrack("audio", "call-mic", "Mik");
+$("call-cam").onclick = () => toggleTrack("video", "call-cam", "Kamera");
 function refreshMeet() {
 	const name = meetRoom;
 	document.body.classList.toggle("in-meet-room", !!name && isFounder());
@@ -1072,6 +1227,7 @@ function onMeetRoom(name) {
 	if (name) {
 		clearInterval(leaveTimer);
 		leaveTimer = null;
+		if (name !== rtc.room) { leaveCall(); joinCall(); }
 	} else if (!leaveTimer) {
 		leaveLeft = LEAVE_GRACE;
 		leaveTimer = setInterval(() => {
@@ -1649,6 +1805,7 @@ async function netStart() {
 			ch.on("broadcast", { event: "st" }, ({ payload }) => payload && payload.j && send("net_state", payload.j));
 			ch.on("broadcast", { event: "hello" }, () => send("net_sync"));
 			ch.on("broadcast", { event: "chat" }, ({ payload }) => chatShow(payload));
+			ch.on("broadcast", { event: "rtc" }, ({ payload }) => rtcOn(payload));
 			ch.on("broadcast", { event: "sales_status" }, ({ payload }) => salesOnStatus(payload));
 			ch.on("broadcast", { event: "sales_rep" }, ({ payload }) => salesOnReply(payload));
 			ch.on("broadcast", { event: "pa_status" }, ({ payload }) => paOnStatus(payload));
@@ -1697,6 +1854,7 @@ async function netStart() {
 	net.bc.onmessage = ({ data: m }) => {
 		if (m.t === "st") send("net_state", m.j);
 		else if (m.t === "chat") chatShow(m.m);
+		else if (m.t === "rtc") rtcOn(m.m);
 		else if (m.t === "hello") {
 			send("net_sync");
 			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), g: myNetGender(), id: net.id });

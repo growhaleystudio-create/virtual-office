@@ -1,43 +1,24 @@
-// POST /api/meeting  (Authorization: Bearer <token founder>)  ->  {url}
-// Membuat tiket (meeting token) Daily untuk room privat "meeting". Hanya founder yang login.
-// Room dibuat otomatis (privat) bila belum ada. Butuh env DAILY_API_KEY & DAILY_DOMAIN.
+// POST /api/meeting  (Authorization: Bearer <token founder>)  ->  {key, ice}
+// Video meeting = WebRTC langsung antar founder (tanpa layanan berbayar). Sinyal lewat channel
+// Supabase yang sudah ada; isi sinyal (SDP) dienkripsi AES-GCM dengan kunci rahasia yang HANYA
+// diberikan ke founder yang login, jadi tamu tidak bisa ikut menyadap atau memalsukan.
+// Opsional (relay TURN untuk jaringan ketat): env TURN_URLS (pisah koma), TURN_USERNAME, TURN_CREDENTIAL.
+const crypto = require("crypto");
 const { verify, bearer, send } = require("./_lib.js");
-
-const ROOM = "meeting";
-const API = "https://api.daily.co/v1";
-
-async function daily(path, method, body) {
-	const r = await fetch(API + path, {
-		method,
-		headers: { Authorization: "Bearer " + process.env.DAILY_API_KEY, "Content-Type": "application/json" },
-		body: body ? JSON.stringify(body) : undefined,
-	});
-	const data = await r.json().catch(() => ({}));
-	return { ok: r.ok, status: r.status, data };
-}
 
 module.exports = async (req, res) => {
 	if (req.method !== "POST") return send(res, 405, { error: "Gunakan POST" });
 	try {
 		const who = verify(bearer(req));
 		if (!who) return send(res, 401, { error: "Sesi founder tidak sah, silakan masuk lagi" });
-		if (!process.env.DAILY_API_KEY) return send(res, 500, { error: "DAILY_API_KEY belum diset di Vercel" });
-		const domain = process.env.DAILY_DOMAIN || "virtualofficewhaley";
-
-		const room = await daily("/rooms/" + ROOM, "GET");
-		if (room.status === 404) {
-			const made = await daily("/rooms", "POST", { name: ROOM, privacy: "private" });
-			if (!made.ok) return send(res, 502, { error: "Gagal membuat room Daily", detail: made.data });
-		} else if (!room.ok) {
-			return send(res, 502, { error: "Gagal cek room Daily", detail: room.data });
+		const secret = (process.env.SESSION_SECRET || "").trim();
+		const key = crypto.createHmac("sha256", secret).update("growhaley-rtc-v1").digest("base64");
+		const ice = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+		const turn = (process.env.TURN_URLS || "").split(",").map((s) => s.trim()).filter(Boolean);
+		if (turn.length) {
+			ice.push({ urls: turn, username: process.env.TURN_USERNAME || "", credential: process.env.TURN_CREDENTIAL || "" });
 		}
-
-		const exp = Math.floor(Date.now() / 1000) + 4 * 3600;
-		const tok = await daily("/meeting-tokens", "POST", {
-			properties: { room_name: ROOM, user_name: who.n, exp, eject_at_token_exp: true },
-		});
-		if (!tok.ok) return send(res, 502, { error: "Gagal membuat tiket meeting", detail: tok.data });
-		return send(res, 200, { url: `https://${domain}.daily.co/${ROOM}?t=${tok.data.token}` });
+		return send(res, 200, { key, ice, turn: turn.length > 0 });
 	} catch (e) {
 		return send(res, 500, { error: String(e.message || e) });
 	}
