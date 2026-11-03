@@ -385,6 +385,14 @@ body.immersive #dpad [data-d="l"], body.immersive #dpad [data-d="r"] { top: 44px
 }
 body.in-meet-room:not(.in-call) .meet-cta { display: block; }
 .meet-info { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0 0 10px; }
+#meet-rooms { display: grid; gap: 6px; margin-bottom: 10px; }
+#meet-rooms .mr { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+#meet-rooms .mr > div { flex: 1; min-width: 0; font-size: 13px; }
+#meet-rooms .mr .fl { color: var(--muted); font-size: 11px; }
+#meet-rooms .mr .who { color: var(--muted); font-size: 12px; margin-top: 2px; }
+#meet-rooms .mr.live { border-color: var(--pink); }
+#meet-rooms .mr.live .who { color: var(--text, inherit); }
+#meet-rooms .mr button { flex: none; padding: 5px 10px; font-size: 12px; }
 #call {
 	position: fixed;
 	right: 16px;
@@ -612,8 +620,11 @@ body.in-call #call { display: flex; }
 		<div class="card founder-only">
 			<h3>Video Meeting <span id="meet-where">gratis</span></h3>
 			<p class="meet-info" id="meet-info">Video call hanya bisa dibuka di Ruang Meeting (Lantai 1) atau Rapat Kecil (Lantai 2). Masuk ke ruangannya dulu.</p>
+			<div id="meet-rooms">
+				<div class="mr" data-room="Ruang Meeting" data-goto="Meeting"><div><b>Ruang Meeting</b> <span class="fl">Lantai 1</span><div class="who">Kosong</div></div><button>Ke sana</button></div>
+				<div class="mr" data-room="Rapat Kecil" data-goto="Rapat Kecil"><div><b>Rapat Kecil</b> <span class="fl">Lantai 2</span><div class="who">Kosong</div></div><button>Ke sana</button></div>
+			</div>
 			<div class="btns">
-				<button id="go-meet">Ke Ruang Meeting</button>
 				<button id="join-meet" disabled>Gabung</button>
 			</div>
 		</div>
@@ -1184,9 +1195,10 @@ async function joinCall() {
 	setCallTitle();
 	if (note) $("meet-info").textContent = note;
 	rtcSend("", { t: "join" });
+	mroomSend(true);
 }
 function leaveCall() {
-	if (rtc.key) rtcSend("", { t: "leave" });
+	if (rtc.key) { rtcSend("", { t: "leave" }); mroomSend(false); }
 	for (const id of Object.keys(rtc.peers)) rtcDrop(id);
 	if (rtc.local) rtc.local.getTracks().forEach((t) => t.stop());
 	rtc.local = null; rtc.key = null; rtc.room = "";
@@ -1240,7 +1252,34 @@ function onMeetRoom(name) {
 }
 $("meet-cta").onclick = joinCall;
 $("join-meet").onclick = joinCall;
-$("go-meet").onclick = () => { send("goto", "Meeting"); toGame(); };
+// info siapa yang sedang call di tiap ruang: tiap peserta menyiarkan "mroom" (detak 10 dtk, kedaluwarsa 25 dtk)
+const mrooms = {};
+function mroomSend(on) {
+	if (!session) return;
+	const payload = { id: net.id, room: rtc.room, name: session.name, on };
+	if (net.ch && net.ok) net.ch.send({ type: "broadcast", event: "mroom", payload });
+	else if (net.bc) net.bc.postMessage({ t: "mroom", m: payload });
+	mroomOn(payload);
+}
+function mroomOn(p) {
+	if (!p || !p.id || !p.room) return;
+	if (p.on) mrooms[p.id] = { room: String(p.room), name: String(p.name || "").slice(0, 20), at: Date.now() };
+	else delete mrooms[p.id];
+	mroomRender();
+}
+function mroomRender() {
+	const now = Date.now();
+	for (const [id, v] of Object.entries(mrooms)) if (now - v.at > 25000) delete mrooms[id];
+	for (const row of document.querySelectorAll("#meet-rooms .mr")) {
+		const names = Object.values(mrooms).filter((v) => v.room === row.dataset.room).map((v) => v.name);
+		row.classList.toggle("live", names.length > 0);
+		row.querySelector(".who").textContent = names.length ? names.length + " di call: " + names.join(", ") : "Kosong";
+	}
+}
+for (const row of document.querySelectorAll("#meet-rooms .mr")) {
+	row.querySelector("button").onclick = () => { send("goto", row.dataset.goto); toGame(); };
+}
+setInterval(() => { if (inCall) mroomSend(true); else mroomRender(); }, 10000);
 $("call-leave").onclick = leaveCall;
 $("call-mini").onclick = () => {
 	const m = $("call").classList.toggle("mini");
@@ -1806,6 +1845,7 @@ async function netStart() {
 			ch.on("broadcast", { event: "hello" }, () => send("net_sync"));
 			ch.on("broadcast", { event: "chat" }, ({ payload }) => chatShow(payload));
 			ch.on("broadcast", { event: "rtc" }, ({ payload }) => rtcOn(payload));
+			ch.on("broadcast", { event: "mroom" }, ({ payload }) => mroomOn(payload));
 			ch.on("broadcast", { event: "sales_status" }, ({ payload }) => salesOnStatus(payload));
 			ch.on("broadcast", { event: "sales_rep" }, ({ payload }) => salesOnReply(payload));
 			ch.on("broadcast", { event: "pa_status" }, ({ payload }) => paOnStatus(payload));
@@ -1855,6 +1895,7 @@ async function netStart() {
 		if (m.t === "st") send("net_state", m.j);
 		else if (m.t === "chat") chatShow(m.m);
 		else if (m.t === "rtc") rtcOn(m.m);
+		else if (m.t === "mroom") mroomOn(m.m);
 		else if (m.t === "hello") {
 			send("net_sync");
 			if (net.tracked) net.bc.postMessage({ t: "hi", key: net.tracked, name: myNetName(), g: myNetGender(), id: net.id });
